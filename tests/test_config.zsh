@@ -87,6 +87,15 @@ _test_llmm_dispatch() {
   assert_contains "$(llmm::route -c --ctx 81920 2>&1)" "launch:m:11111:1:81920 args:-c" "ctx consumed, -c forwarded"
   assert_contains "$(llmm::route --help 2>&1)" "usage" "--help shows llmm usage"
   assert_contains "$(llmm::route -h 2>&1)" "usage" "-h shows llmm usage"
+
+  # update subcommand delegates to install.sh --update
+  local install_calls=0
+  bash() {
+    if [[ "$*" == *"install.sh --update"* ]]; then install_calls=$(( install_calls + 1 )); fi
+  }
+  llmm::route update 2>/dev/null || true
+  assert_eq "$install_calls" 1 "route update calls install.sh --update"
+  unfunction bash 2>/dev/null || true
 }
 _test_llmm_dispatch
 

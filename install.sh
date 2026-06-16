@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
 # install.sh — build llama.cpp from source + install llmm deps, then wire up
 # the llmm command. Bash 3.2-safe (macOS system bash). Idempotent.
+# Self-managing: clones/updates its own source repo at LLMM_SRC.
 #
-# Usage: install.sh [--force] [--rebuild] [--backend cuda|vulkan|cpu]
+# Usage: install.sh [--force] [--rebuild] [--update] [--backend cuda|vulkan|cpu]
 set -euo pipefail
 
-LLMM_SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LLMM_REPO_URL="${LLMM_REPO_URL:-https://github.com/lukoshkin/llmm.git}"
+LLMM_SRC="${LLMM_SRC:-${XDG_DATA_HOME:-$HOME/.local/share}/llmm/src}"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/llmm"
 CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/llmm"
 BIN_DST="$HOME/.local/bin/llmm"
 
-FORCE=false; REBUILD=false; BACKEND="${LLMM_BACKEND:-}"
+_ORIG_ARGS=("$@")
+FORCE=false; REBUILD=false; UPDATE=false; BACKEND="${LLMM_BACKEND:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --force) FORCE=true; shift ;;
-    --rebuild) REBUILD=true; shift ;;
-    --backend) BACKEND="$2"; shift 2 ;;
+    --force)   FORCE=true;          shift ;;
+    --rebuild) REBUILD=true;        shift ;;
+    --update)  UPDATE=true;         shift ;;
+    --backend) BACKEND="$2";        shift 2 ;;
     *) echo "unknown flag: $1" >&2; exit 1 ;;
   esac
 done
@@ -24,6 +28,26 @@ say()  { printf '==> %s\n' "$*"; }
 warn() { printf 'warn: %s\n' "$*" >&2; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 has()  { command -v "$1" >/dev/null 2>&1; }
+
+# Self-bootstrap: if not running from within LLMM_SRC, ensure the repo is
+# cloned there and re-exec from the canonical location.
+[ "$LLMM_REPO_URL" = "PLACEHOLDER_REPO_URL" ] && die "LLMM_REPO_URL is not set — edit install.sh or export LLMM_REPO_URL before running"
+_THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$_THIS_DIR" != "$LLMM_SRC" ]; then
+  has git || die "git is required for bootstrap"
+  if [ ! -d "$LLMM_SRC/.git" ]; then
+    [ -d "$LLMM_SRC" ] && die "$LLMM_SRC exists but has no .git — remove it and retry"
+    say "cloning llmm -> $LLMM_SRC"
+    git clone "$LLMM_REPO_URL" "$LLMM_SRC"
+  fi
+  exec bash "$LLMM_SRC/install.sh" "${_ORIG_ARGS[@]}"
+fi
+
+# Running from LLMM_SRC. Apply --update before anything else.
+if $UPDATE; then
+  say "updating llmm source"
+  git -C "$LLMM_SRC" pull --ff-only || warn "git pull failed; continuing with current checkout"
+fi
 
 OS="$(uname -s)"; ARCH="$(uname -m)"
 say "platform: $OS/$ARCH"
@@ -121,13 +145,13 @@ ensure_runtime_tools() {
 link_and_seed() {
   mkdir -p "$HOME/.local/bin" "$CFG_DIR" "$DATA_DIR/models"
   if [ -e "$BIN_DST" ] && [ ! -L "$BIN_DST" ]; then
-    if $FORCE; then mv "$BIN_DST" "$BIN_DST.pre-evangelist.bak"
+    if $FORCE; then mv "$BIN_DST" "$BIN_DST.pre-llmm.bak"
     else die "refusing to overwrite regular file $BIN_DST (re-run with --force)"; fi
   fi
-  ln -sfn "$LLMM_SRC_DIR/llmm" "$BIN_DST"
-  say "linked $BIN_DST -> $LLMM_SRC_DIR/llmm"
+  ln -sfn "$LLMM_SRC/llmm" "$BIN_DST"
+  say "linked $BIN_DST -> $LLMM_SRC/llmm"
   if [ ! -f "$CFG_DIR/config.zsh" ]; then
-    cp "$LLMM_SRC_DIR/config.default.zsh" "$CFG_DIR/config.zsh"
+    cp "$LLMM_SRC/config.default.zsh" "$CFG_DIR/config.zsh"
     say "seeded $CFG_DIR/config.zsh"
   fi
 }

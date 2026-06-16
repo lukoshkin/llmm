@@ -25,6 +25,7 @@ usage: llmm [command] [flags]
   logs [-f] [--tail N]    tail the server log (default --tail 100)
   config              open the config in $EDITOR
   kill                stop the running server
+  update              pull latest llmm source and re-run install
   help                show this help
 
 start-path flags:
@@ -120,6 +121,7 @@ llmm::route() {
     logs)          llmm::cmd_logs "${rest[@]}" ;;
     config)        llmm::cmd_config ;;
     kill)          server::kill "$LLMM_PORT" ;;
+    update)        bash "$LLMM_ROOT/install.sh" --update ;;
     help|-h|--help) llmm::usage ;;
     *)             ui::err "unknown command: $cmd"; llmm::usage; return 2 ;;
   esac
