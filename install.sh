@@ -40,7 +40,11 @@ if [ "$_THIS_DIR" != "$LLMM_SRC" ]; then
     say "cloning llmm -> $LLMM_SRC"
     git clone "$LLMM_REPO_URL" "$LLMM_SRC"
   fi
-  exec bash "$LLMM_SRC/install.sh" "${_ORIG_ARGS[@]}"
+  if [ "${#_ORIG_ARGS[@]}" -gt 0 ]; then
+    exec bash "$LLMM_SRC/install.sh" "${_ORIG_ARGS[@]}"
+  else
+    exec bash "$LLMM_SRC/install.sh"
+  fi
 fi
 
 # Running from LLMM_SRC. Apply --update before anything else.

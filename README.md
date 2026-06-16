@@ -12,6 +12,12 @@ section of [`../README.md`](../README.md). The full design rationale lives in
 `llmm-local-llm-manager` and `llmm-lean-local-llm-adaptation` specs) with
 task-by-task plans alongside them.
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lukoshkin/llmm/master/install.sh | bash
+```
+
 ---
 
 ## The problem: Claude Code expects a frontier model and a huge window
