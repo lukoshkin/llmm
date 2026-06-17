@@ -19,6 +19,10 @@ assert_contains "$out" "ENV CLAUDE_CODE_AUTO_COMPACT_WINDOW=65536" "lean sets re
 assert_contains "$out" "ENV CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80" "lean default compact pct"
 assert_contains "$out" "ARG --bare" "lean passes --bare"
 assert_contains "$out" "ARG --strict-mcp-config" "lean passes --strict-mcp-config"
+# --model pins the local alias on the CLI so a user-settings model pin (e.g.
+# opus[1m]) can't leak into the lean session (--bare does not suppress it).
+assert_contains "$out" "ARG --model" "lean pins the model on the CLI"
+assert_contains "$out" "ARG myalias" "lean --model is the local alias"
 assert_contains "$out" "ARG --tools" "lean passes --tools"
 assert_contains "$out" "ARG Bash" "lean keeps Bash"
 assert_contains "$out" "ARG TodoWrite" "lean keeps TodoWrite"
@@ -50,6 +54,7 @@ assert_not_contains "$out" "ARG --strict-mcp-config" "full omits --strict-mcp-co
 assert_not_contains "$out" "ARG --system-prompt-file" "full keeps default system prompt"
 assert_not_contains "$out" "ENV CLAUDE_CODE_MAX_CONTEXT_TOKENS" "full omits model context env"
 assert_not_contains "$out" "ENV CLAUDE_CODE_AUTO_COMPACT_WINDOW" "full omits window env"
+assert_not_contains "$out" "ARG --model" "full does not pin --model (model-pin insulation is lean-only)"
 assert_contains "$out" "ENV ANTHROPIC_BASE_URL=http://127.0.0.1:11111" "full still sets base url"
 
 # --- extra claude args are forwarded in both modes ---
