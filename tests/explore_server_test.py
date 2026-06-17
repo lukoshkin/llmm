@@ -103,5 +103,79 @@ es.urllib.request.urlopen = lambda *a, **k: (_ for _ in ()).throw(
 out = es.explore("anything", ["config.default.zsh"])
 check(out.startswith("explore unavailable"), "URLError yields a fallback message")
 
+# _is_loopback gates the nested spawn to a local server
+check(es._is_loopback("http://127.0.0.1:11111"), "127.0.0.1 is loopback")
+check(es._is_loopback("http://localhost:8080"), "localhost is loopback")
+check(not es._is_loopback("https://api.anthropic.com"), "remote host is not loopback")
+
+# agent mode (v2): capture the constructed command and assert the safety-critical flags
+es.MODE = "agent"
+es.CLAUDE_BIN = "/fake/claude"
+captured: dict = {}
+
+
+def _fake_run(cmd, **k):
+    captured["cmd"] = cmd
+    captured["cwd"] = k.get("cwd")
+    return types.SimpleNamespace(
+        stdout="lib/server.zsh: server lifecycle.\n", returncode=0, stderr=""
+    )
+
+
+es.subprocess.run = _fake_run
+ans = es._agent("trace the server lifecycle", ["lib/server.zsh"])
+check(ans[:14] == "lib/server.zsh", "agent mode returns the sub-session answer")
+cmd = captured["cmd"]
+check("--strict-mcp-config" in cmd, "agent cmd disables MCP discovery")
+check(
+    "--mcp-config" not in cmd, "agent cmd passes no mcp-config (no explore recursion)"
+)
+check(cmd[cmd.index("--output-format") + 1] == "text", "agent cmd pins text output")
+check(
+    cmd[cmd.index("--permission-mode") + 1] == "default", "agent cmd uses default perms"
+)
+check("bypassPermissions" not in cmd, "agent cmd does not bypass permissions")
+check(captured["cwd"] == es.ROOT, "agent runs in the repo root")
+
+# nonzero exit falls back to retrieval (which fails on the patched urlopen -> fallback msg)
+es.subprocess.run = lambda *a, **k: types.SimpleNamespace(
+    stdout="", returncode=1, stderr="boom"
+)
+check(
+    es._agent("q", []).startswith("explore unavailable"),
+    "agent failure falls back to retrieval",
+)
+
+# loopback + broad-root guards must short-circuit BEFORE spawning the child
+spawned = {"n": 0}
+
+
+def _no_spawn(*a, **k):
+    spawned["n"] += 1
+    return types.SimpleNamespace(stdout="x", returncode=0, stderr="")
+
+
+es.subprocess.run = _no_spawn
+_saved_base = es.BASE_URL
+es.BASE_URL = "https://api.anthropic.com"
+out = es._agent("q", [])
+check(spawned["n"] == 0, "non-loopback base url never spawns the agent")
+check(out.startswith("explore unavailable"), "non-loopback falls back to retrieval")
+es.BASE_URL = _saved_base
+
+_saved_root = es.ROOT_REAL
+es.ROOT_REAL = os.path.realpath(os.path.expanduser("~"))
+out = es._agent("q", [])
+check(spawned["n"] == 0, "broad root ($HOME) never spawns the agent")
+check(out.startswith("explore unavailable"), "broad root falls back to retrieval")
+es.ROOT_REAL = _saved_root
+
+# no claude binary -> straight to retrieval fallback, never spawns
+es.CLAUDE_BIN = ""
+check(
+    es._agent("q", []).startswith("explore unavailable"),
+    "missing claude falls back to retrieval",
+)
+
 print(f"ran {check.total} checks, {check.failures} failure(s)")
 sys.exit(1 if check.failures else 0)

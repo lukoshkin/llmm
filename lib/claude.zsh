@@ -64,13 +64,15 @@ JSON
   print -r -- "$f"
 }
 
-# claude::write_mcp_json <dir> <id> <want_scratch> <want_explore> <port> <alias>
+# claude::write_mcp_json <dir> <id> <want_scratch> <want_explore> <port> <alias> [mode] [claude_bin]
 # Emits the per-session MCP config with each server included independently, and prints
 # the file path. The scratchpad server (checkpoint/recall) and the explore server are
 # gated separately so either can be on without the other. Repo root for explore is the
-# parent of the .llmm dir.
+# parent of the .llmm dir. mode is the explore strategy (retrieval|agent, default
+# retrieval); claude_bin is the claude path the agent mode spawns (empty -> server's PATH).
 claude::write_mcp_json() {
   local dir="$1" id="$2" want_scratch="$3" want_explore="$4" port="$5" alias="$6"
+  local mode="${7:-retrieval}" claude_bin="${8:-}"
   local hd="$LLMM_ROOT/lib/hooks" f="$dir/mcp.$id.json" root="${dir:h}"
   [[ -L "$f" ]] && ui::die "refusing to write through symlink: $f"
   local -a entries
@@ -83,7 +85,7 @@ claude::write_mcp_json() {
   if [[ "$want_explore" == 1 ]]; then
     entries+=('    "explore": {
       "command": "uv",
-      "args": ["run", "--with", "mcp", "python3", "'"$hd"'/explore_server.py", "--base-url", "http://127.0.0.1:'"$port"'", "--model", "'"$alias"'", "--root", "'"$root"'"]
+      "args": ["run", "--with", "mcp", "python3", "'"$hd"'/explore_server.py", "--base-url", "http://127.0.0.1:'"$port"'", "--model", "'"$alias"'", "--root", "'"$root"'", "--mode", "'"$mode"'", "--claude-bin", "'"$claude_bin"'"]
     }')
   fi
   cat > "$f" <<JSON
@@ -141,6 +143,10 @@ claude::launch() {
       CLAUDE_CODE_MAX_CONTEXT_TOKENS="$ctx"
       CLAUDE_CODE_AUTO_COMPACT_WINDOW="$ctx"
       CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="$pct"
+      # Raise the MCP tool-call timeout so a slow local-model tool (notably explore's
+      # agent mode, which runs a nested claude up to AGENT_TIMEOUT=240s) isn't abandoned
+      # mid-call. Kept above explore_server's AGENT_TIMEOUT so the child is reaped first.
+      MCP_TOOL_TIMEOUT=300000
     )
     cargs+=(--bare --strict-mcp-config)
     if [[ -n "${LLMM_MCP_CONFIG:-}" ]]; then
@@ -157,14 +163,18 @@ claude::launch() {
     [[ "${LLMM_SCRATCHPAD:-1}" == 1 ]] && want_scratch=1
     [[ "${LLMM_SUBAGENTS:-0}" != 1 ]] && want_explore=1
     if (( want_scratch || want_explore )); then
-      local sid scratch mcp
+      local sid scratch mcp emode cbin
       sid="$(claude::session_id)"
       scratch="$PWD/.llmm"
       mcp="$scratch/mcp.$sid.json"
+      emode="${LLMM_EXPLORE_MODE:-retrieval}"
+      # agent mode spawns a nested headless claude; resolve its path now (PATH is known
+      # here, not necessarily inside the uv-run MCP server). Harmless when unused.
+      cbin="$(command -v claude 2>/dev/null)"
       if [[ -z "${LLMM_DRYRUN:-}" ]]; then
         mkdir -p "$scratch"
         claude::reap_stale "$scratch"   # exec() below kills any EXIT trap; reap here instead
-        claude::write_mcp_json "$scratch" "$sid" "$want_scratch" "$want_explore" "$port" "$alias" >/dev/null
+        claude::write_mcp_json "$scratch" "$sid" "$want_scratch" "$want_explore" "$port" "$alias" "$emode" "$cbin" >/dev/null
         grep -qxF '.llmm/' .gitignore 2>/dev/null || \
           { [[ -d .git || -f .gitignore ]] && print -- '.llmm/' >> .gitignore; }
       fi

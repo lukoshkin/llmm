@@ -112,9 +112,20 @@ channel. `explore(question, paths=[])` runs a small stdio MCP server
   3–5 line answer that cites files.
 
 The bulky file contents never enter the main session — you spend a tiny tool call
-plus a short answer instead of a dozen `Read`s. It's not a full isolated subagent
-(that's a possible v2), but it delivers the context-isolation benefit through a
-channel the model actually uses.
+plus a short answer instead of a dozen `Read`s.
+
+**Two strategies — `LLMM_EXPLORE_MODE`** (transparent to the model; the
+`explore(question, paths)` signature is identical either way):
+
+| `LLMM_EXPLORE_MODE` | How the server answers |
+|---------------------|------------------------|
+| `retrieval` *(default)* | Greps/reads under a char budget, then **one** local-model summary call. Fast, predictable, one round-trip. |
+| `agent` | Spawns a **nested headless `claude -p`** with read-only tools (`Read`/`Grep`/`Glob`, no MCP) so the local model drives its own exploration loop in an isolated subprocess; its answer is captured. Runs under `--permission-mode default` (headless = no prompt, so out-of-repo reads are denied while in-repo reads proceed), pinned to the local server, and refuses to run against `$HOME`/`/`. Slower (several round-trips on a slow local model) but can chase multi-hop questions retrieval can't. Falls back to `retrieval` if `claude` is missing or the run errors/times out (the reason is logged to the MCP server's stderr). |
+
+`agent` mode is the interesting experiment: the original `Task` failure was the
+model refusing to *emit a delegation call*, but inside the sub-session it only has
+to *use read tools* — which it does fine. Whether the local model can sustain a
+useful agentic loop end-to-end is the open question worth trying.
 
 **The `LLMM_SUBAGENTS` switch** (default `0`) picks between the two, mutually
 exclusively:

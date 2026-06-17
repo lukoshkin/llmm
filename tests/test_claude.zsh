@@ -17,6 +17,7 @@ assert_contains "$out" "ENV CLAUDE_CODE_DISABLE_1M_CONTEXT=1" "lean disables 1M-
 assert_contains "$out" "ENV CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536" "lean sets model context size"
 assert_contains "$out" "ENV CLAUDE_CODE_AUTO_COMPACT_WINDOW=65536" "lean sets real window"
 assert_contains "$out" "ENV CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80" "lean default compact pct"
+assert_contains "$out" "ENV MCP_TOOL_TIMEOUT=300000" "lean raises MCP tool timeout for slow local tools"
 assert_contains "$out" "ARG --bare" "lean passes --bare"
 assert_contains "$out" "ARG --strict-mcp-config" "lean passes --strict-mcp-config"
 # --model pins the local alias on the CLI so a user-settings model pin (e.g.
@@ -129,7 +130,13 @@ assert_eq "$(python3 -m json.tool "$_mf" >/dev/null 2>&1 && print ok)" ok "scrat
 _mf="$(claude::write_mcp_json "$_wd" exonly 0 1 11111 a)"; _mj="$(cat "$_mf")"
 assert_contains "$_mj" "explore_server.py" "explore-only includes explore"
 assert_not_contains "$_mj" "scratchpad_server.py" "explore-only omits scratchpad"
+assert_contains "$_mj" "retrieval" "explore defaults to retrieval mode"
 assert_eq "$(python3 -m json.tool "$_mf" >/dev/null 2>&1 && print ok)" ok "explore-only mcp json is valid"
+# agent mode wires --mode agent + the claude binary path
+_mf="$(claude::write_mcp_json "$_wd" agentmode 0 1 11111 a agent /usr/bin/claude)"; _mj="$(cat "$_mf")"
+assert_contains "$_mj" "agent" "agent mode recorded in mcp json"
+assert_contains "$_mj" "/usr/bin/claude" "agent mode carries the claude binary path"
+assert_eq "$(python3 -m json.tool "$_mf" >/dev/null 2>&1 && print ok)" ok "agent-mode mcp json is valid"
 
 # --- reap_stale removes dead-PID configs, keeps live-PID configs + the scratchpad .md ---
 # (launch exec()s claude, so the EXIT trap never fires; reap_stale is the real cleanup.)

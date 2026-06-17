@@ -33,6 +33,14 @@ LLMM_SCRATCHPAD_PCT=${LLMM_SCRATCHPAD_PCT:-85}
 #                  works under --bare, but Qwen3-Coder will not emit Task calls — kept as an
 #                  opt-in for stronger local models. See README "Delegated exploration".
 LLMM_SUBAGENTS=${LLMM_SUBAGENTS:-0}
+# Strategy for the `explore` tool (only when LLMM_SUBAGENTS=0). Transparent to the model
+# — the tool signature is identical either way:
+#   retrieval (default) -> server greps/reads under a budget + one local-model summary call.
+#   agent               -> server spawns a nested headless `claude -p` with read-only tools
+#                          (Read/Grep/Glob) so the model drives its own exploration loop in
+#                          an isolated process. Slower (multiple round-trips); falls back to
+#                          retrieval if claude is missing or the run fails.
+LLMM_EXPLORE_MODE=${LLMM_EXPLORE_MODE:-retrieval}
 # Developer-only: path to your local llmm working checkout. When set, `llmm update
 # --local` fast-forwards the installed source from it instead of from origin — for
 # testing local commits before they are pushed. Empty = normal users update from origin.

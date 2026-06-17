@@ -1,10 +1,15 @@
-"""Stdio MCP server exposing `explore`: offload a codebase question to the local
-model in an isolated process so the bulky retrieval tokens never enter the main
-session's context.
-
-v1 = hint-guided read (or keyword grep) + one chat-completion call. The weak local
-model reliably calls MCP tools but will not emit Task calls, so this gives it the
+"""Stdio MCP server exposing `explore`: offload a codebase question to an isolated
+process so the bulky retrieval tokens never enter the main session's context. The weak
+local model reliably calls MCP tools but will not emit Task calls, so this gives it the
 context-isolation benefit of a subagent through the channel it actually uses.
+
+Two strategies, picked by --mode (transparent to the caller — the tool signature is the
+same either way):
+
+  retrieval (v1, default): hint-guided read (or keyword grep) + one chat-completion call.
+  agent     (v2): spawn a nested headless `claude -p` with read-only tools, letting the
+                  local model drive its own Read/Grep/Glob loop; capture its answer.
+                  Falls back to retrieval if claude is unavailable or the run fails.
 """
 
 from __future__ import annotations
@@ -16,8 +21,10 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
 
@@ -27,18 +34,29 @@ parser.add_argument(
 )
 parser.add_argument("--model", required=True, help="model alias the server answers to")
 parser.add_argument("--root", default=os.getcwd(), help="repo root to search")
+parser.add_argument("--mode", default="retrieval", choices=("retrieval", "agent"))
+parser.add_argument(
+    "--claude-bin", default="", help="claude path for agent mode (empty -> PATH)"
+)
 args = parser.parse_args()
 
 BASE_URL = args.base_url.rstrip("/")
 MODEL = args.model
 ROOT = os.path.abspath(args.root)
 ROOT_REAL = os.path.realpath(ROOT)
+MODE = args.mode
+CLAUDE_BIN = args.claude_bin or shutil.which("claude") or ""
 
 MAX_FILES = 8
 MAX_FILE_CHARS = 4000
 BUDGET = 14000
 ANSWER_CAP = 1600
 TIMEOUT = 120
+# Bound the nested agent run. Must stay BELOW the parent's MCP tool-call timeout
+# (llmm sets MCP_TOOL_TIMEOUT=300000 in claude::launch) so the child is killed and we
+# fall back before the parent abandons the tool call and leaves an orphan holding the
+# single llama.cpp slot.
+AGENT_TIMEOUT = 240
 
 _STOP = {
     "the",
@@ -174,6 +192,108 @@ def _ask(question: str, context: str) -> str:
     return out["choices"][0]["message"]["content"].strip()
 
 
+def _retrieval(question: str, paths: list[str]) -> str:
+    """v1: gather context in-process, one summary call."""
+    context = _gather(question, paths)
+    try:
+        answer = _ask(question, context)
+    except (urllib.error.URLError, TimeoutError) as e:
+        return f"explore unavailable ({e}); fall back to reading files yourself."
+    return answer[:ANSWER_CAP]
+
+
+_AGENT_SYSTEM = (
+    "You are a read-only code-exploration subagent. Investigate the repository with "
+    "Read/Grep/Glob to answer the question, then reply with ONLY the answer: concise "
+    "(3-5 lines), citing the relevant file paths. Do not dump file contents. You cannot "
+    "edit anything."
+)
+
+
+def _log(msg: str) -> None:
+    """Surface a one-line reason on the server's stderr (visible in Claude Code's MCP
+    logs) so a failing/degraded agent mode is diagnosable instead of silent."""
+    print(f"[explore agent] {msg}", file=sys.stderr, flush=True)
+
+
+def _is_loopback(base_url: str) -> bool:
+    """Only spawn the nested session against a local server. This is the hard guarantee
+    that agent mode talks to the local model, never api.anthropic.com."""
+    return urlparse(base_url).hostname in ("127.0.0.1", "localhost", "::1", "0.0.0.0")
+
+
+def _agent(question: str, paths: list[str]) -> str:
+    """v2: spawn a nested headless `claude -p` that drives its own read-only tool loop in
+    an isolated process. Falls back to retrieval (logging why) if it can't run safely."""
+    if not CLAUDE_BIN:
+        _log("no claude binary; using retrieval")
+        return _retrieval(question, paths)
+    if not _is_loopback(BASE_URL):
+        _log(f"refusing non-loopback base url {BASE_URL!r}; using retrieval")
+        return _retrieval(question, paths)
+    if ROOT_REAL == os.path.realpath(os.path.expanduser("~")) or ROOT_REAL == os.sep:
+        _log(f"refusing to explore broad root {ROOT_REAL!r}; using retrieval")
+        return _retrieval(question, paths)
+    prompt = question
+    if paths:
+        prompt += "\n\nLikely-relevant paths to start from: " + ", ".join(paths)
+    # Force the local endpoint + dummy creds so the child cannot reach the real API:
+    # routing is by base url, and the key is a placeholder that would fail elsewhere.
+    env = dict(os.environ)
+    env.update(
+        ANTHROPIC_BASE_URL=BASE_URL,
+        ANTHROPIC_API_KEY="llama-cpp",
+        ANTHROPIC_AUTH_TOKEN="llama-cpp",
+        ANTHROPIC_DEFAULT_SONNET_MODEL=MODEL,
+        ANTHROPIC_DEFAULT_OPUS_MODEL=MODEL,
+        ANTHROPIC_DEFAULT_HAIKU_MODEL=MODEL,
+        CLAUDE_CODE_DISABLE_1M_CONTEXT="1",
+        CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1",
+    )
+    # default permission mode (not bypass): in headless -p there is no prompt to answer,
+    # so reads outside the working dir are denied while in-repo reads proceed — confining
+    # the child to ROOT without a hard --add-dir allowlist. --output-format text pins
+    # stdout to a bare answer; --strict-mcp-config with no --mcp-config means the child
+    # has no MCP servers (no recursion back into explore).
+    cmd = [
+        CLAUDE_BIN,
+        "-p",
+        prompt,
+        "--bare",
+        "--strict-mcp-config",
+        "--output-format",
+        "text",
+        "--tools",
+        "Read",
+        "Grep",
+        "Glob",
+        "--model",
+        MODEL,
+        "--permission-mode",
+        "default",
+        "--system-prompt",
+        _AGENT_SYSTEM,
+    ]
+    try:
+        res = subprocess.run(
+            cmd,
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=AGENT_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        _log(f"timed out after {AGENT_TIMEOUT}s; using retrieval")
+        return _retrieval(question, paths)
+    answer = res.stdout.strip()
+    if res.returncode != 0 or not answer:
+        tail = " | ".join((res.stderr or "").strip().splitlines()[-3:])
+        _log(f"exit={res.returncode} empty={not answer}; stderr: {tail}")
+        return _retrieval(question, paths)
+    return answer[:ANSWER_CAP]
+
+
 @mcp.tool()
 def explore(question: str, paths: list[str] | None = None) -> str:
     """Offload a codebase question to a fresh, isolated reasoning pass so the bulky file
@@ -181,12 +301,8 @@ def explore(question: str, paths: list[str] | None = None) -> str:
     where to look — it sharply improves the answer; otherwise the repo is grepped for terms
     from your question. Returns a short (3-5 line) answer. Use this INSTEAD of reading many
     files yourself when exploring or searching the codebase."""
-    context = _gather(question, paths or [])
-    try:
-        answer = _ask(question, context)
-    except (urllib.error.URLError, TimeoutError) as e:
-        return f"explore unavailable ({e}); fall back to reading files yourself."
-    return answer[:ANSWER_CAP]
+    paths = paths or []
+    return _agent(question, paths) if MODE == "agent" else _retrieval(question, paths)
 
 
 if __name__ == "__main__":
