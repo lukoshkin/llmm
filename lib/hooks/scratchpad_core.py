@@ -11,26 +11,47 @@ KEY_TO_HEADER = {
     "findings": "Findings",
     "decisions": "Decisions",
     "dead_ends": "Dead ends",
-    "open_questions": "Open questions"
+    "open_questions": "Open questions",
 }
 
 # Weak models improvise section names ("task_status", "Summary", "dead-ends"). Map
 # common synonyms onto the six canonical keys so a checkpoint lands somewhere sensible
 # instead of failing. Unrecognized names fall back to "findings" (see resolve_section).
 _ALIASES = {
-    "goal": "task", "objective": "task", "plan": "task",
-    "state": "status", "progress": "status", "current": "status",
-    "summary": "status", "update": "status",
-    "finding": "findings", "discovery": "findings", "discoveries": "findings",
-    "note": "findings", "notes": "findings", "learning": "findings",
-    "learnings": "findings", "observation": "findings", "observations": "findings",
-    "result": "findings", "results": "findings",
-    "decision": "decisions", "choice": "decisions", "choices": "decisions",
-    "deadend": "dead_ends", "deadends": "dead_ends", "failure": "dead_ends",
-    "failures": "dead_ends", "failed": "dead_ends", "blocker": "dead_ends",
+    "goal": "task",
+    "objective": "task",
+    "plan": "task",
+    "state": "status",
+    "progress": "status",
+    "current": "status",
+    "summary": "status",
+    "update": "status",
+    "finding": "findings",
+    "discovery": "findings",
+    "discoveries": "findings",
+    "note": "findings",
+    "notes": "findings",
+    "learning": "findings",
+    "learnings": "findings",
+    "observation": "findings",
+    "observations": "findings",
+    "result": "findings",
+    "results": "findings",
+    "decision": "decisions",
+    "choice": "decisions",
+    "choices": "decisions",
+    "deadend": "dead_ends",
+    "deadends": "dead_ends",
+    "failure": "dead_ends",
+    "failures": "dead_ends",
+    "failed": "dead_ends",
+    "blocker": "dead_ends",
     "blockers": "dead_ends",
-    "question": "open_questions", "questions": "open_questions",
-    "todo": "open_questions", "todos": "open_questions", "open": "open_questions"
+    "question": "open_questions",
+    "questions": "open_questions",
+    "todo": "open_questions",
+    "todos": "open_questions",
+    "open": "open_questions",
 }
 
 

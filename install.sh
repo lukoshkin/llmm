@@ -14,15 +14,37 @@ CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/llmm"
 BIN_DST="$HOME/.local/bin/llmm"
 
 _ORIG_ARGS=("$@")
-FORCE=false; REBUILD=false; UPDATE=false; LOCAL=false; BACKEND="${LLMM_BACKEND:-}"
+FORCE=false
+REBUILD=false
+UPDATE=false
+LOCAL=false
+BACKEND="${LLMM_BACKEND:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --force)   FORCE=true;          shift ;;
-    --rebuild) REBUILD=true;        shift ;;
-    --update)  UPDATE=true;         shift ;;
-    --local)   LOCAL=true;          shift ;;
-    --backend) BACKEND="$2";        shift 2 ;;
-    *) echo "unknown flag: $1" >&2; exit 1 ;;
+  --force)
+    FORCE=true
+    shift
+    ;;
+  --rebuild)
+    REBUILD=true
+    shift
+    ;;
+  --update)
+    UPDATE=true
+    shift
+    ;;
+  --local)
+    LOCAL=true
+    shift
+    ;;
+  --backend)
+    BACKEND="$2"
+    shift 2
+    ;;
+  *)
+    echo "unknown flag: $1" >&2
+    exit 1
+    ;;
   esac
 done
 
@@ -30,12 +52,29 @@ done
 # output (green ==>, see lib/ui.zsh). Severity prefixes keep the usual yellow/red.
 # Color only on a TTY and when NO_COLOR is unset; stdout (say) and stderr
 # (warn/die) are gated independently so redirecting one still colors the other.
-if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then C_CYN=$'\033[36m'; C_O_RST=$'\033[0m'; else C_CYN=''; C_O_RST=''; fi
-if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then C_YEL=$'\033[33m'; C_RED=$'\033[31m'; C_E_RST=$'\033[0m'; else C_YEL=''; C_RED=''; C_E_RST=''; fi
-say()  { printf '%s==>%s %s\n' "$C_CYN" "$C_O_RST" "$*"; }
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_CYN=$'\033[36m'
+  C_O_RST=$'\033[0m'
+else
+  C_CYN=''
+  C_O_RST=''
+fi
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_YEL=$'\033[33m'
+  C_RED=$'\033[31m'
+  C_E_RST=$'\033[0m'
+else
+  C_YEL=''
+  C_RED=''
+  C_E_RST=''
+fi
+say() { printf '%s==>%s %s\n' "$C_CYN" "$C_O_RST" "$*"; }
 warn() { printf '%swarn:%s %s\n' "$C_YEL" "$C_E_RST" "$*" >&2; }
-die()  { printf '%serror:%s %s\n' "$C_RED" "$C_E_RST" "$*" >&2; exit 1; }
-has()  { command -v "$1" >/dev/null 2>&1; }
+die() {
+  printf '%serror:%s %s\n' "$C_RED" "$C_E_RST" "$*" >&2
+  exit 1
+}
+has() { command -v "$1" >/dev/null 2>&1; }
 
 # Self-bootstrap: if not running from within LLMM_SRC, ensure the repo is
 # cloned there and re-exec from the canonical location.
@@ -62,21 +101,22 @@ if $UPDATE; then
     [ -d "$LLMM_DEV_SRC/.git" ] || die "LLMM_DEV_SRC is not a git repo: $LLMM_DEV_SRC"
     _br="$(git -C "$LLMM_SRC" rev-parse --abbrev-ref HEAD)"
     say "updating llmm source from local $LLMM_DEV_SRC ($_br)"
-    git -C "$LLMM_SRC" pull --ff-only "$LLMM_DEV_SRC" "$_br" \
-      || die "local ff-only pull failed — $LLMM_SRC may have diverged from $LLMM_DEV_SRC"
+    git -C "$LLMM_SRC" pull --ff-only "$LLMM_DEV_SRC" "$_br" ||
+      die "local ff-only pull failed — $LLMM_SRC may have diverged from $LLMM_DEV_SRC"
   else
     say "updating llmm source"
     git -C "$LLMM_SRC" pull --ff-only || warn "git pull failed; continuing with current checkout"
   fi
 fi
 
-OS="$(uname -s)"; ARCH="$(uname -m)"
+OS="$(uname -s)"
+ARCH="$(uname -m)"
 say "platform: $OS/$ARCH"
 
 # --- base deps ---------------------------------------------------------------
 ensure_base_deps() {
-  has git   || die "git is required"
-  has curl  || die "curl is required"
+  has git || die "git is required"
+  has curl || die "curl is required"
   if ! has cmake; then
     if [ "$OS" = Darwin ]; then die "cmake required: brew install cmake"; fi
     die "cmake required (e.g. apt install cmake / dnf install cmake)"
@@ -88,16 +128,27 @@ ensure_base_deps() {
 
 # --- backend selection -------------------------------------------------------
 detect_backend() {
-  if [ "$OS" = Darwin ]; then echo metal; return; fi
+  if [ "$OS" = Darwin ]; then
+    echo metal
+    return
+  fi
   if has nvidia-smi; then echo cuda; else echo cpu; fi
 }
 
 choose_backend() {
-  if [ "$OS" = Darwin ]; then BACKEND=metal; return; fi
-  local default; default="$(detect_backend)"
+  if [ "$OS" = Darwin ]; then
+    BACKEND=metal
+    return
+  fi
+  local default
+  default="$(detect_backend)"
   if [ -n "$BACKEND" ]; then return; fi
   # Non-interactive (no TTY): take the detected default silently.
-  if [ ! -t 0 ]; then BACKEND="$default"; say "backend: $BACKEND (auto, non-interactive)"; return; fi
+  if [ ! -t 0 ]; then
+    BACKEND="$default"
+    say "backend: $BACKEND (auto, non-interactive)"
+    return
+  fi
   printf 'compute backend [cuda|vulkan|cpu] (default %s): ' "$default"
   read -r BACKEND || true
   [ -n "$BACKEND" ] || BACKEND="$default"
@@ -107,11 +158,14 @@ choose_backend() {
 
 cmake_backend_flags() {
   case "$1" in
-    metal)  echo "-DGGML_METAL=ON" ;;
-    cuda)   has nvcc || warn "nvcc not found; CUDA build may fail"; echo "-DGGML_CUDA=ON" ;;
-    vulkan) echo "-DGGML_VULKAN=ON" ;;
-    cpu)    echo "" ;;
-    *)      die "unknown backend: $1" ;;
+  metal) echo "-DGGML_METAL=ON" ;;
+  cuda)
+    has nvcc || warn "nvcc not found; CUDA build may fail"
+    echo "-DGGML_CUDA=ON"
+    ;;
+  vulkan) echo "-DGGML_VULKAN=ON" ;;
+  cpu) echo "" ;;
+  *) die "unknown backend: $1" ;;
   esac
 }
 
@@ -127,7 +181,8 @@ build_llamacpp() {
     git -C "$src" pull --ff-only || warn "git pull failed; building current checkout"
   fi
   if $REBUILD; then rm -rf "$src/build"; fi
-  local flags; flags="$(cmake_backend_flags "$BACKEND")"
+  local flags
+  flags="$(cmake_backend_flags "$BACKEND")"
   say "configuring (backend=$BACKEND)"
   # HTTPS model download (--hf-repo) is built in when OpenSSL is present;
   # the old -DLLAMA_CURL flag is deprecated and ignored by current llama.cpp.
@@ -147,7 +202,10 @@ build_llamacpp() {
 ensure_uv_hf() {
   if ! has uv; then
     say "installing uv"
-    curl -LsSf https://astral.sh/uv/install.sh | sh || { warn "uv install failed; pulls will fall back to --hf-repo"; return 0; }
+    curl -LsSf https://astral.sh/uv/install.sh | sh || {
+      warn "uv install failed; pulls will fall back to --hf-repo"
+      return 0
+    }
     # uv installs to ~/.local/bin which we expect on PATH.
   fi
   if has uv && ! has hf; then
@@ -166,7 +224,8 @@ ensure_runtime_tools() {
 link_and_seed() {
   mkdir -p "$HOME/.local/bin" "$CFG_DIR" "$DATA_DIR/models"
   if [ -e "$BIN_DST" ] && [ ! -L "$BIN_DST" ]; then
-    if $FORCE; then mv "$BIN_DST" "$BIN_DST.pre-llmm.bak"
+    if $FORCE; then
+      mv "$BIN_DST" "$BIN_DST.pre-llmm.bak"
     else die "refusing to overwrite regular file $BIN_DST (re-run with --force)"; fi
   fi
   ln -sfn "$LLMM_SRC/llmm" "$BIN_DST"
@@ -185,6 +244,6 @@ main() {
   ensure_runtime_tools
   link_and_seed
   say "done. Run 'llmm' to start, or 'llmm help'."
-  case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) warn "add ~/.local/bin to PATH";; esac
+  case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) warn "add ~/.local/bin to PATH" ;; esac
 }
 main

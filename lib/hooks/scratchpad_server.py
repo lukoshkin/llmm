@@ -1,4 +1,5 @@
 """Stdio MCP server exposing checkpoint + recall over a sectioned scratchpad file."""
+
 from __future__ import annotations
 
 import argparse
@@ -35,7 +36,11 @@ def checkpoint(section: str, content: str, mode: str = "append") -> str:
     """Save progress to one scratchpad section. mode=append for findings/decisions/dead_ends/open_questions, replace for task/status."""
     _write(sc.merge(_read(), section, content, mode))
     resolved = sc.resolve_section(section)
-    return f"saved to {resolved}" if resolved == section else f"saved to {resolved} (from {section!r})"
+    return (
+        f"saved to {resolved}"
+        if resolved == section
+        else f"saved to {resolved} (from {section!r})"
+    )
 
 
 @mcp.tool()
