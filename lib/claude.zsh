@@ -92,6 +92,12 @@ claude::launch() {
     ANTHROPIC_DEFAULT_OPUS_MODEL="$alias"
     CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
   )
+  # Pin the model on the CLI in both modes: --model outranks the user's
+  # ~/.claude/settings.json `model` key (which --bare does NOT suppress), so a global
+  # pin like "opus[1m]" can't leak its label or 1M tag into an llmm session. Every
+  # llmm session targets the local server (which ignores the model name); this just
+  # makes the session self-describe as the local alias, not the inherited default.
+  cargs+=(--model "$alias")
   if [[ "$lean" == 1 ]]; then
     # Validate before building so bad config fails loudly and early.
     local prompt pct
@@ -104,12 +110,6 @@ claude::launch() {
       CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="$pct"
     )
     cargs+=(--bare --strict-mcp-config)
-    # Pin the model on the CLI: --model outranks the user's ~/.claude/settings.json
-    # `model` key (which --bare does NOT suppress), so a global pin like "opus[1m]"
-    # can't leak its label or 1M tag into a lean local session. The endpoint is the
-    # local server, which ignores the model name; this just makes the session
-    # self-describe as the local alias instead of the inherited default.
-    cargs+=(--model "$alias")
     if [[ -n "${LLMM_MCP_CONFIG:-}" ]]; then
       [[ -f "$LLMM_MCP_CONFIG" ]] || ui::die "LLMM_MCP_CONFIG not found: $LLMM_MCP_CONFIG"
       cargs+=(--mcp-config "$LLMM_MCP_CONFIG")

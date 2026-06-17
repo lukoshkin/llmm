@@ -54,7 +54,9 @@ assert_not_contains "$out" "ARG --strict-mcp-config" "full omits --strict-mcp-co
 assert_not_contains "$out" "ARG --system-prompt-file" "full keeps default system prompt"
 assert_not_contains "$out" "ENV CLAUDE_CODE_MAX_CONTEXT_TOKENS" "full omits model context env"
 assert_not_contains "$out" "ENV CLAUDE_CODE_AUTO_COMPACT_WINDOW" "full omits window env"
-assert_not_contains "$out" "ARG --model" "full does not pin --model (model-pin insulation is lean-only)"
+# Model-pin insulation applies in both modes: full is also a local session.
+assert_contains "$out" "ARG --model" "full pins the model on the CLI too"
+assert_contains "$out" "ARG myalias" "full --model is the local alias"
 assert_contains "$out" "ENV ANTHROPIC_BASE_URL=http://127.0.0.1:11111" "full still sets base url"
 
 # --- extra claude args are forwarded in both modes ---
