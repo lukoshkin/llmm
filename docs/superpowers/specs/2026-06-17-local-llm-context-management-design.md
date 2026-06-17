@@ -294,9 +294,18 @@ Scratchpad files are ephemeral session state, not project history.
   if 85% fires before Claude Code compacts. The README notes autocompaction floors near 100K
   with a ~33% reserve, so the effective trigger relative to `CLAUDE_CODE_MAX_CONTEXT_TOKENS`
   must be measured once on a real session and `LLMM_SCRATCHPAD_PCT` set safely below it.
-- **`Task` under `--bare`:** unverified whether the built-in `general-purpose` agent is
-  reachable when agent auto-discovery is disabled. Verify before depending on `LLMM_SUBAGENTS`;
-  the rest of the spec is independent of it.
+- **`Task` under `--bare` (RESOLVED 2026-06-17):** the built-in `general-purpose` agent IS
+  reachable under `--bare` — `/agents` → Library lists it under "Built-in (always available)"
+  alongside `claude`, `Explore`, `Plan`, etc. (only *creating/editing* agents is disabled in
+  bare mode). So `LLMM_SUBAGENTS=1` correctly exposes a working `Task` tool. The real limit is
+  the **weak local model**: in testing it consistently ignored explicit instructions to call
+  `Task` and did the work inline instead. So the knob is technically sound but of little value
+  until the model reliably delegates; keep it off by default.
+- **Model-pin leak via `~/.claude/settings.json` (RESOLVED 2026-06-17):** `--bare` does NOT
+  suppress the user-settings `model` key, so a global pin like `"opus[1m]"` leaked its label
+  and 1M tag into llmm sessions (window behavior stayed correct — compacts ~67K, ceiling 73K —
+  but the display was misleading). Fixed by pinning `--model <alias>` on the CLI in both lean
+  and full launches, which outranks user settings.
 - **Stop hook forces an unattended turn (intentional):** because returning `additionalContext`
   blocks the stop, hitting the threshold makes Claude auto-continue and checkpoint *without*
   the user's next message. This is the desired safety behavior, stated here so it isn't
