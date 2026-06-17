@@ -120,22 +120,19 @@ plus a short answer instead of a dozen `Read`s.
 | `LLMM_EXPLORE_MODE` | How the server answers |
 |---------------------|------------------------|
 | `retrieval` *(default)* | Greps/reads under a char budget, then **one** local-model summary call. Fast, predictable, one round-trip. |
-| `agent` | Spawns a **nested headless `claude -p`** with read-only tools (`Read`/`Grep`/`Glob`, no MCP) so the local model drives its own exploration loop in an isolated subprocess; its answer is captured. Pinned to the local server (loopback-guarded), refuses to run against `$HOME`/`/`, bounded at 90s with fallback to `retrieval` (reason logged to the MCP server's stderr). **Experimental — see the caveat below.** |
+| `agent` | Spawns a **nested headless `claude -p`** with read-only tools (`Read`/`Grep`/`Glob`, no MCP) so the local model drives its own exploration loop in an isolated subprocess; its answer is captured. Loopback-guarded (local server only), refuses `$HOME`/`/`, reads **confined to the repo** via a generated allow-list + `--permission-mode default`, bounded so the whole call stays under the 120s MCP ceiling (70s agent + ≤35s fallback), with fallback to `retrieval` (reason logged to the MCP server's stderr). **Opt-in / high-variance — see below.** |
 
-> **Agent mode is not working yet on this model.** The first live run showed the
-> nested Qwen reproducing the same failure that killed the built-in `Task` tool:
-> it narrated a `Task(...)` block as text instead of calling `Read`/`Grep`/`Glob`,
-> so it returned nothing useful. A harder system prompt is in place for the next
-> attempt, but until that's confirmed, **`retrieval` is the only strategy known to
-> work** — leave `LLMM_EXPLORE_MODE` at its default. Note also that agent mode runs
-> under `bypassPermissions`, which (unlike retrieval's `_in_root` confinement) lets
-> the sub-session read absolute paths outside the repo; the loopback/`$HOME` guards
-> and a local-only model are the remaining limits.
-
-`agent` mode is the interesting experiment: the original `Task` failure was the
-model refusing to *emit a delegation call*, but inside the sub-session it only has
-to *use read tools* — which it does fine. Whether the local model can sustain a
-useful agentic loop end-to-end is the open question worth trying.
+> **Agent mode works, but it's high-variance and slow — keep `retrieval` as the
+> default.** Across live runs the nested model has both (a) produced a genuinely
+> accurate, file-citing answer in ~64s and (b) failed — narrating a `Task(...)`
+> block instead of calling tools, or looping on a bad path until the timeout. It
+> also tends to *guess* absolute paths from training data (e.g. `/Users/danny/…`),
+> which the repo-confined allow-list now denies (closing the exfiltration risk and
+> nudging it back to in-repo paths). Because a real agentic loop on a slow local
+> model often needs 60–90s and the MCP tool-call ceiling is a hard 120s, **many
+> runs will hit the 70s agent cap and fall back to retrieval** — you still get a
+> good answer, just slower. Net: agent mode "wins" only on fast explorations; for
+> day-to-day use `retrieval` is the rational default.
 
 **The `LLMM_SUBAGENTS` switch** (default `0`) picks between the two, mutually
 exclusively:

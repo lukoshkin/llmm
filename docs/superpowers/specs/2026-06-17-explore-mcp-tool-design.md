@@ -79,9 +79,10 @@ paths)` signature is unchanged — and only switches the server's strategy:
 - `retrieval` (v1): gather + one summary call, as above.
 - `agent` (v2): spawn a nested headless `claude -p` in the repo root with
   `--bare --strict-mcp-config --output-format text --tools Read Grep Glob
-  --permission-mode bypassPermissions` and a forceful read-only explorer system
-  prompt, env pointed at the local server. The local model drives its own tool
-  loop in an isolated process; stdout is captured and capped.
+  --permission-mode default --settings <repo-confined allow-list>` and a forceful
+  read-only explorer system prompt, env pointed at the local server. The local
+  model drives its own tool loop in an isolated process; stdout is captured and
+  capped.
 
 The `claude` path is resolved at launch (where PATH is known) and baked into the
 explore server's `mcp.json` args (`--mode`, `--claude-bin`).
@@ -93,45 +94,49 @@ explore server's `mcp.json` args (`--mode`, `--claude-bin`).
   A `_is_loopback()` guard refuses to spawn unless the base URL is
   `127.0.0.1`/`localhost`/`::1`/`0.0.0.0` — a misconfig fails closed (falls back
   to retrieval), it can never silently call `api.anthropic.com`.
-- **Read containment (weakened tradeoff).** Started on `--permission-mode
-  default` (headless = no prompt → out-of-repo reads denied), but the first live
-  run showed the child never reached a read at all (see finding below), so it was
-  switched to `bypassPermissions` to let the read-only tools run unattended. That
-  removes v1's hard `_in_root` confinement: `Read` can take absolute paths outside
-  `ROOT`. The remaining limits are the loopback + `$HOME`/`/` guards and the
-  local-only model. A settings-based read deny-rule is the follow-up if agent mode
-  is kept.
+- **Read containment.** `--permission-mode default` + a generated `--settings`
+  allow-list (`Read(<ROOT>/**)`, `Grep`, `Glob`). In headless `-p` there is no
+  prompt, so reads under `ROOT` are pre-approved while reads outside `ROOT` are
+  unmatched → denied. This restores v1-grade confinement: a hallucinated absolute
+  path (the nested model guesses training-data paths like `/Users/danny/…`) is
+  denied rather than read. Plus the loopback + `$HOME`/`/` guards.
 - **No recursion.** `--strict-mcp-config` with no `--mcp-config` → the child has
   no MCP servers, so `explore` cannot re-arm itself.
-- **Timeout coordination.** The MCP tool-call timeout was **observed at 120s** and
-  not raised by `MCP_TOOL_TIMEOUT=300000` (kept best-effort), so `AGENT_TIMEOUT` is
-  set to **90s — below 120s** — as the real bound: the child is reaped and we fall
-  back to retrieval before the parent abandons the call and leaves an orphan on the
-  single `--parallel 1` slot. (No `--max-turns` in this CLI build.)
+- **Bounded under the 120s ceiling.** The MCP tool-call timeout is **observed at
+  120s** and not raised by `MCP_TOOL_TIMEOUT` (kept best-effort). The whole
+  `explore()` call must finish under it *including* a retrieval fallback, so two
+  enforced timeouts bound it: `AGENT_TIMEOUT=70s` (subprocess kill) +
+  `AGENT_FALLBACK_ASK_TIMEOUT=35s` (fallback HTTP) + overhead ≈ 110s < 120s. (No
+  `--max-turns` in this CLI build, so the subprocess timeout is the turn bound.)
 - **Diagnosable, not silent.** Every fallback path logs a one-line reason (and a
-  stderr tail on nonzero exit) to the server's stderr via `_log()`, so a dead or
-  degraded agent mode is visible in Claude Code's MCP logs instead of masquerading
-  as working retrieval.
+  stderr tail on nonzero exit) to the server's stderr via `_log()`.
 
-### Live run #1 finding (2026-06-17)
+### Live findings (2026-06-17)
 
-The premise — "inside the sub-session it only needs to *use* read tools, which it
-does" — did **not** hold on the first run. The nested model returned a narrated
-`Task(...)` code block as text instead of calling Grep/Glob/Read — reproducing the
-exact Task-refusal that killed the built-in `Task` approach, now one level down. It
-never reached a read (so permission mode was moot), and the parent killed the call
-at the 120s MCP timeout. Fixes applied for run #2: `AGENT_TIMEOUT=90` (clean
-fallback under the 120s ceiling); a much more forceful system prompt ("there is NO
-Task tool; your first action must be a real Grep/Glob call, never narrate");
-`bypassPermissions` to remove the read-permission variable.
+Across several real runs the nested model is **high-variance**, not a flat
+failure:
+
+- **Worked:** one call read the real files (`README.md`, `lib/server.zsh`,
+  `lib/claude.zsh`, hooks, `install.sh`, …) and produced an accurate, file-citing
+  answer in **64s** — finishing on its own under the cap.
+- **Failed:** other calls narrated a `Task(...)` block as text (the same refusal
+  that killed built-in `Task`), or looped on a bad path until the timeout.
+- **Recurring quirk:** it guesses absolute training-data paths
+  (`/Users/danny/…`, `/usr/local/google/…`) before recovering — the motivation
+  for both the repo-confined allow-list and the "use relative paths, never Read a
+  directory, be efficient (~8 calls)" prompt hardening.
+
+Conclusion: agent mode is viable but unreliable and slow; `retrieval` stays the
+default and agent mode is an opt-in experiment.
 
 ### Open items
 
-1. Does the hardened prompt get the nested model to actually call Grep/Glob/Read
-   instead of narrating `Task(...)`? If run #2 still narrates, agent mode is a dead
-   end for this model and retrieval stays the only strategy.
-2. If reads do happen, add a settings-based deny-rule to restore `_in_root`-grade
-   containment under `bypassPermissions`.
+1. Does the repo-confined allow-list (`--permission-mode default` + `--settings`)
+   actually let in-repo reads proceed unattended in headless `-p`? If reads get
+   denied (symptom: agent always returns empty → falls back), adjust the
+   `Read(<ROOT>/**)` rule syntax or fall back to `bypassPermissions` + a sandbox.
+2. Can the 120s MCP tool-call ceiling be raised at all (right env var / per-server
+   `timeout`)? If yes, give the agent more room; if not, it stays fallback-heavy.
 
 ## Out of scope
 

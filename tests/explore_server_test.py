@@ -4,6 +4,7 @@ Stubs the `mcp` package so the module imports without it installed. Run:
 """
 
 import importlib.util
+import json
 import os
 import sys
 import types
@@ -132,10 +133,18 @@ check(
 )
 check(cmd[cmd.index("--output-format") + 1] == "text", "agent cmd pins text output")
 check(
-    cmd[cmd.index("--permission-mode") + 1] == "bypassPermissions",
-    "agent cmd lets read-only tools run unattended",
+    cmd[cmd.index("--permission-mode") + 1] == "default",
+    "agent cmd uses default perms (not bypass)",
 )
+check("bypassPermissions" not in cmd, "agent cmd does not bypass permissions")
 check(captured["cwd"] == es.ROOT, "agent runs in the repo root")
+# a settings file confines reads to ROOT (allow Read under ROOT + Grep/Glob)
+sp = cmd[cmd.index("--settings") + 1]
+_rules = json.load(open(sp))["permissions"]["allow"]
+check(f"Read({es.ROOT}/**)" in _rules, "agent settings allow Read only under ROOT")
+check("Grep" in _rules and "Glob" in _rules, "agent settings allow Grep/Glob")
+os.remove(sp)
+es._AGENT_SETTINGS_PATH = ""
 
 # nonzero exit falls back to retrieval (which fails on the patched urlopen -> fallback msg)
 es.subprocess.run = lambda *a, **k: types.SimpleNamespace(

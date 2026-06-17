@@ -52,11 +52,13 @@ MAX_FILE_CHARS = 4000
 BUDGET = 14000
 ANSWER_CAP = 1600
 TIMEOUT = 120
-# Bound the nested agent run. The parent's MCP tool-call timeout is observed to be 120s
-# (MCP_TOOL_TIMEOUT did not raise it in this CLI build), so keep this safely BELOW 120s:
-# the child is killed and we fall back to retrieval before the parent abandons the call
-# and leaves an orphan holding the single llama.cpp slot.
-AGENT_TIMEOUT = 90
+# The parent's MCP tool-call timeout is observed to be 120s (MCP_TOOL_TIMEOUT did not
+# raise it in this CLI build). The whole explore() call must finish under it, INCLUDING a
+# retrieval fallback after the agent is killed. Both bounds are enforced timeouts:
+#   AGENT_TIMEOUT (subprocess kill) + AGENT_FALLBACK_ASK_TIMEOUT (fallback HTTP) + overhead
+#   = 70 + 35 + slack  ~= 110s < 120s, guaranteed.
+AGENT_TIMEOUT = 70
+AGENT_FALLBACK_ASK_TIMEOUT = 35
 
 _STOP = {
     "the",
@@ -165,7 +167,7 @@ def _gather(question: str, paths: list[str]) -> str:
     return "\n\n".join(chunks)
 
 
-def _ask(question: str, context: str) -> str:
+def _ask(question: str, context: str, timeout: int = TIMEOUT) -> str:
     system = (
         "You are a code-exploration assistant. Answer the question using ONLY the "
         "repository context provided. Be concise: 3-5 lines max, cite file paths. If "
@@ -187,16 +189,17 @@ def _ask(question: str, context: str) -> str:
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         out = json.load(resp)
     return out["choices"][0]["message"]["content"].strip()
 
 
-def _retrieval(question: str, paths: list[str]) -> str:
-    """v1: gather context in-process, one summary call."""
+def _retrieval(question: str, paths: list[str], ask_timeout: int = TIMEOUT) -> str:
+    """v1: gather context in-process, one summary call. ask_timeout is tightened when this
+    runs as an agent-mode fallback so the whole explore() stays under the 120s ceiling."""
     context = _gather(question, paths)
     try:
-        answer = _ask(question, context)
+        answer = _ask(question, context, ask_timeout)
     except (urllib.error.URLError, TimeoutError) as e:
         return f"explore unavailable ({e}); fall back to reading files yourself."
     return answer[:ANSWER_CAP]
@@ -206,11 +209,32 @@ _AGENT_SYSTEM = (
     "You are a read-only code-exploration subagent running inside a tool loop. You have "
     "exactly three tools: Grep, Glob, Read. There is NO Task tool and no subagents — never "
     "write `Task(...)`, never output a code block that describes calling a tool, never "
-    "narrate a plan. To investigate you must ACTUALLY CALL the tools: start with a Grep or "
-    "Glob to locate the relevant files, Read the few that matter, then reply with ONLY the "
-    "final answer — 3-5 lines citing the file paths. Your first action must be a real Grep "
-    "or Glob tool call, not text."
+    "narrate a plan. To investigate you must ACTUALLY CALL the tools, and your FIRST action "
+    "must be a real Grep or Glob call, not text. Rules: use paths RELATIVE to the current "
+    "directory (e.g. `lib/server.zsh`), never absolute paths from memory; never Read a "
+    "directory — use Glob/Grep to list or search it; be efficient — at most ~8 tool calls, "
+    "then stop and reply with ONLY the final answer: 3-5 lines citing the file paths."
 )
+
+_AGENT_SETTINGS_PATH = ""
+
+
+def _agent_settings() -> str:
+    """Write (once) a settings file confining the child's reads to ROOT: allow Read only
+    under ROOT, plus Grep/Glob. With --permission-mode default in headless -p, a read
+    outside ROOT is unmatched and denied (no prompt to approve it) — restoring v1-grade
+    containment so a hallucinated absolute path can't exfiltrate host files."""
+    global _AGENT_SETTINGS_PATH
+    if _AGENT_SETTINGS_PATH:
+        return _AGENT_SETTINGS_PATH
+    cfg = {"permissions": {"allow": [f"Read({ROOT}/**)", "Grep", "Glob"]}}
+    d = os.path.join(ROOT, ".llmm")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "explore-agent-settings.json")
+    with open(p, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh)
+    _AGENT_SETTINGS_PATH = p
+    return p
 
 
 def _log(msg: str) -> None:
@@ -237,6 +261,7 @@ def _agent(question: str, paths: list[str]) -> str:
     if ROOT_REAL == os.path.realpath(os.path.expanduser("~")) or ROOT_REAL == os.sep:
         _log(f"refusing to explore broad root {ROOT_REAL!r}; using retrieval")
         return _retrieval(question, paths)
+    fb = AGENT_FALLBACK_ASK_TIMEOUT  # tightened so agent + fallback stays under 120s
     prompt = question
     if paths:
         prompt += "\n\nLikely-relevant paths to start from: " + ", ".join(paths)
@@ -253,19 +278,20 @@ def _agent(question: str, paths: list[str]) -> str:
         CLAUDE_CODE_DISABLE_1M_CONTEXT="1",
         CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1",
     )
-    # bypassPermissions: the read-only tools must run unattended in headless -p (default
-    # mode was observed to never reach reads). TRADEOFF: bypass also lets Read take
-    # absolute paths outside ROOT, so this is weaker containment than v1's _in_root — the
-    # loopback + $HOME/'/' guards above and the local-only model are the remaining limits;
-    # a settings-based read deny-rule is the follow-up if we keep agent mode.
-    # --output-format text pins stdout to a bare answer; --strict-mcp-config with no
-    # --mcp-config means the child has no MCP servers (no recursion back into explore).
+    # --permission-mode default + a generated --settings allow-list scoped to ROOT: in
+    # headless -p, reads under ROOT are pre-approved (no prompt) while reads outside ROOT
+    # are unmatched and denied — confining the child without bypassing permissions, so a
+    # hallucinated absolute path is denied rather than read. --output-format text pins
+    # stdout to a bare answer; --strict-mcp-config with no --mcp-config means the child has
+    # no MCP servers (no recursion back into explore).
     cmd = [
         CLAUDE_BIN,
         "-p",
         prompt,
         "--bare",
         "--strict-mcp-config",
+        "--settings",
+        _agent_settings(),
         "--output-format",
         "text",
         "--tools",
@@ -275,7 +301,7 @@ def _agent(question: str, paths: list[str]) -> str:
         "--model",
         MODEL,
         "--permission-mode",
-        "bypassPermissions",
+        "default",
         "--system-prompt",
         _AGENT_SYSTEM,
     ]
@@ -290,12 +316,12 @@ def _agent(question: str, paths: list[str]) -> str:
         )
     except subprocess.TimeoutExpired:
         _log(f"timed out after {AGENT_TIMEOUT}s; using retrieval")
-        return _retrieval(question, paths)
+        return _retrieval(question, paths, fb)
     answer = res.stdout.strip()
     if res.returncode != 0 or not answer:
         tail = " | ".join((res.stderr or "").strip().splitlines()[-3:])
         _log(f"exit={res.returncode} empty={not answer}; stderr: {tail}")
-        return _retrieval(question, paths)
+        return _retrieval(question, paths, fb)
     return answer[:ANSWER_CAP]
 
 
