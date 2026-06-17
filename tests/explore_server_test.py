@@ -104,6 +104,11 @@ es.urllib.request.urlopen = lambda *a, **k: (_ for _ in ()).throw(
 out = es.explore("anything", ["config.default.zsh"])
 check(out.startswith("explore unavailable"), "URLError yields a fallback message")
 
+# _repo_files lists real tracked files (this test runs inside the git repo)
+_files = es._repo_files()
+check("config.default.zsh" in _files, "repo listing includes real files")
+check("/home/user/" not in _files, "repo listing has no hallucinated absolute paths")
+
 # _is_loopback gates the nested spawn to a local server
 check(es._is_loopback("http://127.0.0.1:11111"), "127.0.0.1 is loopback")
 check(es._is_loopback("http://localhost:8080"), "localhost is loopback")
@@ -138,6 +143,11 @@ check(
 )
 check("bypassPermissions" not in cmd, "agent cmd does not bypass permissions")
 check(captured["cwd"] == es.ROOT, "agent runs in the repo root")
+_prompt = cmd[cmd.index("-p") + 1]
+check(
+    "Files in this repository" in _prompt,
+    "agent prompt is seeded with the real file list",
+)
 # a settings file confines reads to ROOT (allow Read under ROOT + Grep/Glob)
 sp = cmd[cmd.index("--settings") + 1]
 _rules = json.load(open(sp))["permissions"]["allow"]

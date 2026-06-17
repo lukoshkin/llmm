@@ -59,6 +59,10 @@ TIMEOUT = 120
 #   = 70 + 35 + slack  ~= 110s < 120s, guaranteed.
 AGENT_TIMEOUT = 70
 AGENT_FALLBACK_ASK_TIMEOUT = 35
+# Cap the real-file listing seeded into the agent prompt so it grounds in actual paths
+# instead of hallucinating training-data ones, without blowing the small nested window.
+REPO_FILES_MAX = 200
+REPO_FILES_BUDGET = 6000
 
 _STOP = {
     "the",
@@ -245,6 +249,28 @@ def _agent_settings() -> str:
     return p
 
 
+def _repo_files() -> str:
+    """A capped listing of the repo's real, relative file paths. Seeded into the agent
+    prompt so the model reads existing files instead of guessing training-data paths like
+    /home/user/github/...; `git ls-files` (tracked files only), with a glob fallback."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", ROOT, "ls-files"], capture_output=True, text=True, timeout=10
+        )
+        files = res.stdout.split() if res.returncode == 0 else []
+    except (OSError, subprocess.TimeoutExpired):
+        files = []
+    if not files:
+        hits = glob.glob(os.path.join(ROOT, "**", "*"), recursive=True)
+        files = [
+            os.path.relpath(p, ROOT)
+            for p in hits
+            if os.path.isfile(p) and ".git/" not in p and "/.llmm/" not in p
+        ]
+    listing = "\n".join(sorted(files)[:REPO_FILES_MAX])
+    return listing[:REPO_FILES_BUDGET]
+
+
 def _log(msg: str) -> None:
     """Surface a one-line reason on the server's stderr (visible in Claude Code's MCP
     logs) so a failing/degraded agent mode is diagnosable instead of silent."""
@@ -271,8 +297,14 @@ def _agent(question: str, paths: list[str]) -> str:
         return _retrieval(question, paths)
     fb = AGENT_FALLBACK_ASK_TIMEOUT  # tightened so agent + fallback stays under 120s
     prompt = question
+    listing = _repo_files()
+    if listing:
+        prompt += (
+            "\n\nFiles in this repository (paths relative to the current directory). Read "
+            "only from this list, using each path exactly as shown:\n" + listing
+        )
     if paths:
-        prompt += "\n\nLikely-relevant paths to start from: " + ", ".join(paths)
+        prompt += "\n\nStart from: " + ", ".join(paths)
     # Force the local endpoint + dummy creds so the child cannot reach the real API:
     # routing is by base url, and the key is a placeholder that would fail elsewhere.
     env = dict(os.environ)

@@ -141,9 +141,24 @@ was *our own* system prompt forbidding it ("there is NO Task tool, never write
 `Task(...)`") — and on a 3B-active model, naming the token primes it more than the
 negation suppresses it ("don't think of an elephant"). The sub-agent prompt was
 rewritten **purely positive**, naming only Grep/Glob/Read and containing no
-"Task"/"subagent"/"never" vocabulary at all, to stop feeding the cue. Expected to
-reduce — not necessarily eliminate — the reflex, since "explore the codebase" is
-itself a trigger.
+"Task"/"subagent"/"never" vocabulary at all, to stop feeding the cue.
+
+**Run after the positive rewrite:** the Task-text reflex dropped sharply (a nested
+session made 54 real `Read` calls, zero `Task(...)` text) — confirming our
+prohibition was much of the priming. But it exposed the *deeper* root cause: the
+model then **hallucinated absolute file paths** (`/home/user/github/claude-3-5-
+sonnet/src/server.py`, …) instead of using Grep/Glob to discover real ones — the
+same "emit memorized patterns, don't ground in the real repo" failure, just with
+paths instead of `Task()`. (The repo-confined allow-list denies those, so it's a
+containment win, but the agent finds nothing and falls back.)
+
+**Mitigation (implemented): seed the real file list.** `_repo_files()` runs
+`git ls-files` (glob fallback), capped (`REPO_FILES_MAX=200`,
+`REPO_FILES_BUDGET=6000`), and the listing is injected into the agent prompt
+("Files in this repository … read only from this list"). The model now has the
+repo's actual paths in front of it, so there is nothing to hallucinate — the
+single change most likely to make agent mode read real files. Still to be
+verified live.
 
 ### Open items
 

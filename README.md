@@ -6,11 +6,8 @@ the local server via `ANTHROPIC_BASE_URL`.
 
 This README is the **"why and how"** — what had to be adapted to make a weak local
 model usable inside Claude Code, and what was learned trying different models on
-real hardware. For **install, commands, and config keys**, see the `## llmm`
-section of [`../README.md`](../README.md). The full design rationale lives in
-[`../../../docs/superpowers/specs/`](../../../docs/superpowers/specs/) (the
-`llmm-local-llm-manager` and `llmm-lean-local-llm-adaptation` specs) with
-task-by-task plans alongside them.
+real hardware. Install is below; config keys live in `config.default.zsh` (copied to
+`~/.config/llmm/config.zsh` on first run).
 
 ## Install
 
@@ -204,9 +201,8 @@ staying off the swap.
 
 ## See also
 
-- [`../README.md`](../README.md) — install, commands, config keys, storage layout.
+- `config.default.zsh` — every config key with inline docs.
 - `prompts/lean-coder.md` — the slim system prompt; `prompts/lean-explore.md` /
   `prompts/lean-subagent.md` — the delegation addenda for the two `LLMM_SUBAGENTS` modes.
 - `lib/claude.zsh` — the lean/full launch seam.
 - `lib/hooks/explore_server.py` — the MCP `explore` server (delegated exploration).
-- `docs/superpowers/specs/` and `docs/superpowers/plans/` — design and build history.
