@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 HEADERS = ["Task", "Status", "Findings", "Decisions", "Dead ends", "Open questions"]
 KEY_TO_HEADER = {
     "task": "Task",
@@ -12,13 +14,54 @@ KEY_TO_HEADER = {
     "open_questions": "Open questions"
 }
 
+# Weak models improvise section names ("task_status", "Summary", "dead-ends"). Map
+# common synonyms onto the six canonical keys so a checkpoint lands somewhere sensible
+# instead of failing. Unrecognized names fall back to "findings" (see resolve_section).
+_ALIASES = {
+    "goal": "task", "objective": "task", "plan": "task",
+    "state": "status", "progress": "status", "current": "status",
+    "summary": "status", "update": "status",
+    "finding": "findings", "discovery": "findings", "discoveries": "findings",
+    "note": "findings", "notes": "findings", "learning": "findings",
+    "learnings": "findings", "observation": "findings", "observations": "findings",
+    "result": "findings", "results": "findings",
+    "decision": "decisions", "choice": "decisions", "choices": "decisions",
+    "deadend": "dead_ends", "deadends": "dead_ends", "failure": "dead_ends",
+    "failures": "dead_ends", "failed": "dead_ends", "blocker": "dead_ends",
+    "blockers": "dead_ends",
+    "question": "open_questions", "questions": "open_questions",
+    "todo": "open_questions", "todos": "open_questions", "open": "open_questions"
+}
+
+
+def resolve_section(section: str) -> str:
+    """Map a possibly-improvised section name onto a canonical key. Never raises:
+    normalize case/separators, try the canonical keys, then the alias table, then a
+    compound name like "task_status" (take the last recognized token — compound names
+    usually name the category last), and finally fall back to "findings"."""
+    norm = re.sub(r"[^a-z0-9]+", "_", section.strip().lower()).strip("_")
+    if norm in KEY_TO_HEADER:
+        return norm
+    if norm in _ALIASES:
+        return _ALIASES[norm]
+    resolved = None
+    for tok in norm.split("_"):
+        if tok in KEY_TO_HEADER:
+            resolved = tok
+        elif tok in _ALIASES:
+            resolved = _ALIASES[tok]
+    return resolved or "findings"
+
+
+def resolve_mode(mode: str) -> str:
+    """Map a mode string onto 'append' or 'replace'; default to the safer 'append'
+    so a fumbled mode never overwrites or crashes."""
+    m = mode.strip().lower()
+    return "replace" if m in ("replace", "overwrite", "set", "reset") else "append"
+
 
 def _header(section: str) -> str:
-    if section not in KEY_TO_HEADER:
-        raise ValueError(
-            f"unknown section: {section!r}; valid: {sorted(KEY_TO_HEADER)}"
-        )
-    return KEY_TO_HEADER[section]
+    return KEY_TO_HEADER[resolve_section(section)]
 
 
 def empty_doc() -> str:
@@ -55,14 +98,12 @@ def merge(text: str, section: str, content: str, mode: str) -> str:
     header = _header(section)
     sections = parse_sections(text)
     content = content.strip()
-    if mode == "replace":
+    if resolve_mode(mode) == "replace":
         sections[header] = content
-    elif mode == "append":
+    else:
         existing = sections[header].strip("\n")
         bullet = content if content.startswith("- ") else f"- {content}"
         sections[header] = f"{existing}\n{bullet}".strip("\n") if existing else bullet
-    else:
-        raise ValueError(f"mode must be 'append' or 'replace', got {mode!r}")
     return render(sections)
 
 

@@ -34,12 +34,23 @@ doc = sc.merge(doc, "status", "step 2: editing", "replace")
 check(sc.read_section(doc, "status").strip() == "step 2: editing", "replace swaps status")
 check("a.py:1 — does X" in sc.read_section(doc, "findings"), "replace leaves findings intact")
 
-# unknown section is rejected
-try:
-    sc.merge(doc, "bogus", "x", "append")
-    check(False, "unknown section raises")
-except ValueError:
-    check(True, "unknown section raises")
+# improvised section names resolve to a canonical key instead of raising
+check(sc.resolve_section("Status") == "status", "case/whitespace normalized")
+check(sc.resolve_section("dead-ends") == "dead_ends", "separators normalized")
+check(sc.resolve_section("Summary") == "status", "alias maps to canonical")
+check(sc.resolve_section("questions") == "open_questions", "alias plural maps")
+check(sc.resolve_section("task_status") == "status", "compound takes last known token")
+check(sc.resolve_section("bogus") == "findings", "unknown falls back to findings")
+
+# an unknown section never raises; its content lands in the fallback section
+doc = sc.merge(doc, "task_status", "wrote it as a combo", "replace")
+check("wrote it as a combo" in sc.read_section(doc, "status"), "combo content lands in status")
+doc = sc.merge(doc, "bogus", "stray note", "append")
+check("stray note" in sc.read_section(doc, "findings"), "unknown content lands in findings")
+
+# a fumbled mode never raises; it defaults to append
+doc = sc.merge(doc, "decisions", "chose X", "add")
+check("chose X" in sc.read_section(doc, "decisions"), "unknown mode defaults to append")
 
 print(f"ran {check.total} checks, {check.failures} failure(s)")
 sys.exit(1 if check.failures else 0)

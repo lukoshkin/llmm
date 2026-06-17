@@ -34,7 +34,8 @@ def _write(text: str) -> None:
 def checkpoint(section: str, content: str, mode: str = "append") -> str:
     """Save progress to one scratchpad section. mode=append for findings/decisions/dead_ends/open_questions, replace for task/status."""
     _write(sc.merge(_read(), section, content, mode))
-    return f"saved to {section}"
+    resolved = sc.resolve_section(section)
+    return f"saved to {resolved}" if resolved == section else f"saved to {resolved} (from {section!r})"
 
 
 @mcp.tool()
