@@ -32,6 +32,7 @@ args = parser.parse_args()
 BASE_URL = args.base_url.rstrip("/")
 MODEL = args.model
 ROOT = os.path.abspath(args.root)
+ROOT_REAL = os.path.realpath(ROOT)
 
 MAX_FILES = 8
 MAX_FILE_CHARS = 4000
@@ -82,12 +83,22 @@ def _terms(question: str) -> list[str]:
     return [w for w in dict.fromkeys(words) if w.lower() not in _STOP][:8]
 
 
+def _in_root(path: str) -> bool:
+    """True only if path (symlinks resolved) is ROOT or lives under it. Confines every
+    read to the repo so a hint like '/etc/passwd', '../../x', or a symlink pointing
+    outside ROOT cannot exfiltrate files into the explore summary."""
+    rp = os.path.realpath(path)
+    return rp == ROOT_REAL or rp.startswith(ROOT_REAL + os.sep)
+
+
 def _expand_paths(paths: list[str]) -> list[str]:
     out: list[str] = []
     for p in paths:
+        if os.path.isabs(p):
+            continue  # hints are repo-relative; ignore absolute escapes
         matches = glob.glob(os.path.join(ROOT, p), recursive=True)
         out.extend(matches if matches else [os.path.join(ROOT, p)])
-    return [p for p in dict.fromkeys(out) if os.path.isfile(p)]
+    return [p for p in dict.fromkeys(out) if os.path.isfile(p) and _in_root(p)]
 
 
 def _grep_files(terms: list[str]) -> list[str]:
@@ -110,7 +121,8 @@ def _grep_files(terms: list[str]) -> list[str]:
             ROOT,
         ]
     res = subprocess.run(cmd, capture_output=True, text=True)
-    return [ln for ln in res.stdout.splitlines() if ln.strip()][:MAX_FILES]
+    hits = [ln for ln in res.stdout.splitlines() if ln.strip() and _in_root(ln)]
+    return hits[:MAX_FILES]
 
 
 def _gather(question: str, paths: list[str]) -> str:

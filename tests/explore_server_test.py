@@ -71,6 +71,22 @@ ctx = es._gather("where is LLMM_PORT set", ["config.default.zsh"])
 check(ctx.startswith("### config.default.zsh"), "gathered block carries a path header")
 check("LLMM_PORT" in ctx, "gathered block contains file content")
 
+# path hints are confined to ROOT: absolute, ../ escape, and symlink-out are all rejected
+check(es._expand_paths(["/etc/passwd"]) == [], "absolute path hint rejected")
+check(es._expand_paths(["../../../../etc/passwd"]) == [], "parent-escape hint rejected")
+_evil = os.path.join(REPO, "_explore_escape_link")
+try:
+    if not os.path.lexists(_evil):
+        os.symlink("/etc/passwd", _evil)
+    check(
+        es._expand_paths(["_explore_escape_link"]) == [], "symlink-out-of-root rejected"
+    )
+    check(es._in_root(os.path.join(REPO, "README.md")), "in-root path accepted")
+    check(not es._in_root("/etc/passwd"), "out-of-root path rejected")
+finally:
+    if os.path.islink(_evil):
+        os.unlink(_evil)
+
 # keyword grep (no hints) returns existing files, bounded
 g = es._grep_files(es._terms("server build_args alias port"))
 check(bool(g) and all(os.path.isfile(f) for f in g), "grep returns real files")

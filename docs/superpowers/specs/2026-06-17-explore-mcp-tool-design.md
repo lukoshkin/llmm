@@ -1,7 +1,9 @@
 # `explore` MCP tool — subagent workaround for weak local models
 
 **Date:** 2026-06-17
-**Status:** approved (design), implementing
+**Status:** validated — shipped and confirmed live. The local Qwen3-Coder-Next emits
+`explore` calls on its own (unlike `Task`) and passes sensible `paths` hints unprompted;
+the server returns an accurate summary.
 
 ## Problem
 
