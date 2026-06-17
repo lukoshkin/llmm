@@ -42,3 +42,26 @@ assert_eq "$(server::should_rotate 60 50)" yes "rotate over cap"
 assert_eq "$(server::should_rotate 10 50)" no  "no rotate under cap"
 rm -rf "$tmp"
 unset XDG_STATE_HOME
+
+# kill: nothing on a free port -> friendly message, rc 0, meta cleared.
+tmpk="$(mktemp -d)"; XDG_STATE_HOME="$tmpk"
+kout="$(server::kill 65501 2>&1)"; krc=$?
+assert_eq "$krc" 0 "kill rc 0 when no server"
+assert_contains "$kout" "no managed server" "kill reports none when port free"
+
+# kill-all: every instance is reaped — the meta pid PLUS all command-line matches,
+# in one call (regression for the old head -1 that left duplicates behind).
+# Mock pids_on (command-line matches) and the kill builtin so no real processes run.
+server::meta_write 65510 1001 /m a 100 default
+_orig_pids="$functions[server::pids_on]"
+functions[server::pids_on]='print -l 1001 1002 1003'
+typeset -ga KILLED=()
+kill() { [[ "$1" == -0 ]] && return 0; KILLED+=("$1"); }   # -0 = alive-check (true); else record
+server::kill 65510 >/dev/null 2>&1
+unfunction kill
+functions[server::pids_on]="$_orig_pids"
+assert_contains "${KILLED[*]}" "1001" "kill-all signals the meta pid"
+assert_contains "${KILLED[*]}" "1002" "kill-all signals a pgrep-matched pid"
+assert_contains "${KILLED[*]}" "1003" "kill-all signals every pgrep-matched pid"
+assert_eq "$(server::meta_get 65510 pid 2>/dev/null || print gone)" gone "kill clears meta"
+rm -rf "$tmpk"; unset XDG_STATE_HOME

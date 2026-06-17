@@ -43,6 +43,27 @@ server::is_healthy() {
   curl -fsS "http://127.0.0.1:$1/health" >/dev/null 2>&1
 }
 
+# server::pids_on <port> -> PIDs of every llama-server launched for this port.
+server::pids_on() { pgrep -f "llama-server.*--port $1( |\$)" 2>/dev/null; }
+
+# server::await_health <port> [pid] -> 0 once /health responds; 1 if it never does
+# (or the given pid exits first). Heartbeat every 30s. Shared by start (own pid) and
+# ensure (attach to an in-flight start), so a second `llmm` waits instead of duplicating.
+server::await_health() {
+  local port="$1" pid="${2:-}" lf; lf="$(server::logfile "$port")"
+  local i
+  for (( i = 1; i <= 300; i++ )); do
+    if server::is_healthy "$port"; then return 0; fi
+    if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+      ui::err "llama-server exited during startup. Last log lines:"; tail -20 "$lf" >&2; return 1
+    fi
+    sleep 2
+    (( i % 15 == 0 )) && ui::info "still waiting ($(( i * 2 ))s)... loading/downloading weights; llama-server logs only to a TTY, so $lf may stay empty"
+  done
+  ui::err "llama-server did not become healthy within 600s. Last log lines:"; tail -20 "$lf" >&2
+  return 1
+}
+
 server::meta_write() {  # <port> <pid> <model> <alias> <ctx> <profile>
   local port="$1"; mkdir -p "$(server::run_dir)"
   {
@@ -97,21 +118,16 @@ server::start() {
     LD_LIBRARY_PATH="$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$bin" "${argv[@]}" >"$lf" 2>&1 &
   fi
   local pid=$!
+  # Record the pid immediately (not only on success) so a concurrent `llmm` sees a
+  # start already in progress and attaches instead of launching a duplicate, and so
+  # `llmm kill` can reap a server that is still downloading/loading.
+  server::meta_write "$port" "$pid" "$model" "$alias" "$(config::ctx_size "$profile")" "$profile"
 
-  local i
-  for (( i = 1; i <= 300; i++ )); do
-    if server::is_healthy "$port"; then
-      server::meta_write "$port" "$pid" "$model" "$alias" "$(config::ctx_size "$profile")" "$profile"
-      ui::info "server ready (pid $pid)"
-      return 0
-    fi
-    if ! kill -0 "$pid" 2>/dev/null; then
-      ui::err "llama-server exited during startup. Last log lines:"; tail -20 "$lf" >&2; return 1
-    fi
-    sleep 2
-    (( i % 15 == 0 )) && ui::info "still waiting ($(( i * 2 ))s)..."
-  done
-  ui::err "llama-server did not become healthy within 600s. Last log lines:"; tail -20 "$lf" >&2
+  if server::await_health "$port" "$pid"; then
+    ui::info "server ready (pid $pid)"
+    return 0
+  fi
+  server::meta_clear "$port"
   return 1
 }
 
@@ -134,20 +150,38 @@ server::ensure() {
     if [[ -t 0 ]]; then
       print -u2 -n "running server is $ralias ($rprof); switch to $alias ($profile)? [y/N] "
       local ans; read -r ans
-      if [[ "$ans" == [yY]* ]]; then server::kill "$port"; else ui::info "keeping $ralias"; return 0; fi
+      if [[ "$ans" == [yY]* ]]; then
+        server::kill "$port"
+        server::start "$profile" "$model" "$alias" "$port"; return
+      fi
+      ui::info "keeping $ralias"; return 0
     else
       ui::warn "non-interactive: keeping running $ralias despite requested $alias"; return 0
     fi
   fi
+  # Not healthy. If a llama-server is already starting on this port, attach to its
+  # startup rather than stacking a duplicate — llmm runs one instance per port.
+  local inflight; inflight="$(server::pids_on "$port" | head -1)"
+  if [[ -n "$inflight" ]]; then
+    ui::info "a llama-server is already starting on :$port (pid $inflight); waiting for it instead of launching another"
+    server::await_health "$port" "$inflight"; return
+  fi
   server::start "$profile" "$model" "$alias" "$port"
 }
 
-server::kill() {  # <port>
-  local pid; pid="$(server::meta_get "$1" pid 2>/dev/null || true)"
-  if [[ -z "$pid" ]]; then
-    pid="$(pgrep -f "llama-server.*--port $1" 2>/dev/null | head -1)"
-  fi
-  [[ -n "$pid" ]] || { ui::info "no managed server on :$1"; return 0; }
-  ui::info "killing pid $pid (:$1)"; kill "$pid" 2>/dev/null
+# server::kill <port> -> stop every llama-server on this port (meta pid + all that
+# match by command line), so one call fully clears the port even if duplicates stacked.
+server::kill() {
+  local -a pids
+  local mp; mp="$(server::meta_get "$1" pid 2>/dev/null || true)"
+  [[ -n "$mp" ]] && pids+=("$mp")
+  local p
+  for p in ${(f)"$(server::pids_on "$1")"}; do [[ -n "$p" ]] && pids+=("$p"); done
+  pids=(${(u)pids})
+  if (( ${#pids} == 0 )); then ui::info "no managed server on :$1"; server::meta_clear "$1"; return 0; fi
+  for p in "${pids[@]}"; do
+    kill -0 "$p" 2>/dev/null || continue
+    ui::info "killing pid $p (:$1)"; kill "$p" 2>/dev/null
+  done
   server::meta_clear "$1"
 }
