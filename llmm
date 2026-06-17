@@ -25,7 +25,8 @@ usage: llmm [command] [flags]
   logs [-f] [--tail N]    tail the server log (default --tail 100)
   config              open the config in $EDITOR
   kill                stop the running server
-  update              pull latest llmm source and re-run install
+  update [--local]    update llmm: pull from origin, or with --local from
+                      $LLMM_DEV_SRC (your local checkout), then re-run install
   help                show this help
 
 start-path flags:
@@ -121,7 +122,14 @@ llmm::route() {
     logs)          llmm::cmd_logs "${rest[@]}" ;;
     config)        llmm::cmd_config ;;
     kill)          server::kill "$LLMM_PORT" ;;
-    update)        bash "$LLMM_ROOT/install.sh" --update ;;
+    update)
+      if (( ${rest[(I)--local]} )); then
+        [[ -n "${LLMM_DEV_SRC:-}" ]] || ui::die "update --local needs LLMM_DEV_SRC set in your config (your local llmm checkout)"
+        [[ -d "$LLMM_DEV_SRC/.git" ]] || ui::die "LLMM_DEV_SRC is not a git repo: $LLMM_DEV_SRC"
+        LLMM_DEV_SRC="$LLMM_DEV_SRC" bash "$LLMM_ROOT/install.sh" --update --local
+      else
+        bash "$LLMM_ROOT/install.sh" --update
+      fi ;;
     help|-h|--help) llmm::usage ;;
     *)             ui::err "unknown command: $cmd"; llmm::usage; return 2 ;;
   esac

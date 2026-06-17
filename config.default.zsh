@@ -29,6 +29,10 @@ LLMM_SCRATCHPAD_PCT=${LLMM_SCRATCHPAD_PCT:-85}
 # adds ~1-2K tokens of tool description and depends on general-purpose being reachable
 # under --bare (verify before relying on it).
 LLMM_SUBAGENTS=${LLMM_SUBAGENTS:-0}
+# Developer-only: path to your local llmm working checkout. When set, `llmm update
+# --local` fast-forwards the installed source from it instead of from origin — for
+# testing local commits before they are pushed. Empty = normal users update from origin.
+LLMM_DEV_SRC=${LLMM_DEV_SRC:-}
 # Per-launch window override is `llmm --ctx N`; the persistent default lives in
 # LLMM_PROFILES below (default.ctx_size). Raise it on machines with more RAM.
 

@@ -3,7 +3,8 @@
 # the llmm command. Bash 3.2-safe (macOS system bash). Idempotent.
 # Self-managing: clones/updates its own source repo at LLMM_SRC.
 #
-# Usage: install.sh [--force] [--rebuild] [--update] [--backend cuda|vulkan|cpu]
+# Usage: install.sh [--force] [--rebuild] [--update [--local]] [--backend cuda|vulkan|cpu]
+#   --local: with --update, fast-forward LLMM_SRC from $LLMM_DEV_SRC instead of origin.
 set -euo pipefail
 
 LLMM_REPO_URL="${LLMM_REPO_URL:-https://github.com/lukoshkin/llmm.git}"
@@ -13,12 +14,13 @@ CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/llmm"
 BIN_DST="$HOME/.local/bin/llmm"
 
 _ORIG_ARGS=("$@")
-FORCE=false; REBUILD=false; UPDATE=false; BACKEND="${LLMM_BACKEND:-}"
+FORCE=false; REBUILD=false; UPDATE=false; LOCAL=false; BACKEND="${LLMM_BACKEND:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --force)   FORCE=true;          shift ;;
     --rebuild) REBUILD=true;        shift ;;
     --update)  UPDATE=true;         shift ;;
+    --local)   LOCAL=true;          shift ;;
     --backend) BACKEND="$2";        shift 2 ;;
     *) echo "unknown flag: $1" >&2; exit 1 ;;
   esac
@@ -49,8 +51,17 @@ fi
 
 # Running from LLMM_SRC. Apply --update before anything else.
 if $UPDATE; then
-  say "updating llmm source"
-  git -C "$LLMM_SRC" pull --ff-only || warn "git pull failed; continuing with current checkout"
+  if $LOCAL; then
+    [ -n "${LLMM_DEV_SRC:-}" ] || die "--local requires LLMM_DEV_SRC (your local llmm checkout); set it in config.zsh"
+    [ -d "$LLMM_DEV_SRC/.git" ] || die "LLMM_DEV_SRC is not a git repo: $LLMM_DEV_SRC"
+    _br="$(git -C "$LLMM_SRC" rev-parse --abbrev-ref HEAD)"
+    say "updating llmm source from local $LLMM_DEV_SRC ($_br)"
+    git -C "$LLMM_SRC" pull --ff-only "$LLMM_DEV_SRC" "$_br" \
+      || die "local ff-only pull failed — $LLMM_SRC may have diverged from $LLMM_DEV_SRC"
+  else
+    say "updating llmm source"
+    git -C "$LLMM_SRC" pull --ff-only || warn "git pull failed; continuing with current checkout"
+  fi
 fi
 
 OS="$(uname -s)"; ARCH="$(uname -m)"
