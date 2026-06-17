@@ -95,11 +95,15 @@ explore server's `mcp.json` args (`--mode`, `--claude-bin`).
   `127.0.0.1`/`localhost`/`::1`/`0.0.0.0` — a misconfig fails closed (falls back
   to retrieval), it can never silently call `api.anthropic.com`.
 - **Read containment.** `--permission-mode default` + a generated `--settings`
-  allow-list (`Read(<ROOT>/**)`, `Grep`, `Glob`). In headless `-p` there is no
-  prompt, so reads under `ROOT` are pre-approved while reads outside `ROOT` are
-  unmatched → denied. This restores v1-grade confinement: a hallucinated absolute
-  path (the nested model guesses training-data paths like `/Users/danny/…`) is
-  denied rather than read. Plus the loopback + `$HOME`/`/` guards.
+  allow-list scoping **all three** read tools to `ROOT`
+  (`Read(<ROOT>/**)`, `Grep(<ROOT>/**)`, `Glob(<ROOT>/**)` — Grep/Glob also take a
+  path, so leaving them unscoped would let the model search/enumerate outside the
+  repo). In headless `-p` there is no prompt, so calls under `ROOT` are
+  pre-approved while anything outside is unmatched → denied. A hallucinated
+  absolute path (the model guesses training-data paths like `/Users/danny/…`) is
+  denied rather than read. Plus the loopback + `$HOME`/`/` guards. The exact
+  path-specifier syntax is unverified (open item) but fails **safe**: wrong syntax
+  → unmatched → denied, never open.
 - **No recursion.** `--strict-mcp-config` with no `--mcp-config` → the child has
   no MCP servers, so `explore` cannot re-arm itself.
 - **Bounded under the 120s ceiling.** The MCP tool-call timeout is **observed at
@@ -132,9 +136,11 @@ default and agent mode is an opt-in experiment.
 ### Open items
 
 1. Does the repo-confined allow-list (`--permission-mode default` + `--settings`)
-   actually let in-repo reads proceed unattended in headless `-p`? If reads get
-   denied (symptom: agent always returns empty → falls back), adjust the
-   `Read(<ROOT>/**)` rule syntax or fall back to `bypassPermissions` + a sandbox.
+   actually let in-repo `Read`/`Grep`/`Glob` proceed unattended in headless `-p`?
+   If they get denied (symptom: agent always returns empty → falls back), the
+   path-specifier syntax for one of the three tools is wrong — adjust it, or fall
+   back to an OS sandbox (`sandbox-exec`) binding only `ROOT` readable. Per-tool
+   scoping for Grep/Glob in particular is unverified.
 2. Can the 120s MCP tool-call ceiling be raised at all (right env var / per-server
    `timeout`)? If yes, give the agent more room; if not, it stays fallback-heavy.
 

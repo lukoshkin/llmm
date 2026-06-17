@@ -141,8 +141,15 @@ check(captured["cwd"] == es.ROOT, "agent runs in the repo root")
 # a settings file confines reads to ROOT (allow Read under ROOT + Grep/Glob)
 sp = cmd[cmd.index("--settings") + 1]
 _rules = json.load(open(sp))["permissions"]["allow"]
-check(f"Read({es.ROOT}/**)" in _rules, "agent settings allow Read only under ROOT")
-check("Grep" in _rules and "Glob" in _rules, "agent settings allow Grep/Glob")
+check(f"Read({es.ROOT}/**)" in _rules, "agent settings scope Read to ROOT")
+check(
+    f"Grep({es.ROOT}/**)" in _rules and f"Glob({es.ROOT}/**)" in _rules,
+    "agent settings scope Grep/Glob to ROOT",
+)
+check(
+    "Grep" not in _rules and "Glob" not in _rules,
+    "no unscoped Grep/Glob allow (would search outside ROOT)",
+)
 os.remove(sp)
 es._AGENT_SETTINGS_PATH = ""
 

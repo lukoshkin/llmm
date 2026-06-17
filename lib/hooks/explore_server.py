@@ -220,14 +220,21 @@ _AGENT_SETTINGS_PATH = ""
 
 
 def _agent_settings() -> str:
-    """Write (once) a settings file confining the child's reads to ROOT: allow Read only
-    under ROOT, plus Grep/Glob. With --permission-mode default in headless -p, a read
-    outside ROOT is unmatched and denied (no prompt to approve it) — restoring v1-grade
-    containment so a hallucinated absolute path can't exfiltrate host files."""
+    """Write (once) a settings file confining the child's reads to ROOT. All three read
+    tools are scoped — Read/Grep/Glob each take a path, so leaving Grep/Glob unscoped
+    would let the model search/enumerate outside ROOT. With --permission-mode default in
+    headless -p, a call outside ROOT is unmatched and denied (no prompt to approve it).
+    NOTE: the path-specifier syntax for Grep/Glob is not verified against this CLI build;
+    if it is wrong it fails SAFE (unmatched -> denied), never open — but in-repo Grep/Glob
+    must be live-verified to still work (open item in the spec)."""
     global _AGENT_SETTINGS_PATH
     if _AGENT_SETTINGS_PATH:
         return _AGENT_SETTINGS_PATH
-    cfg = {"permissions": {"allow": [f"Read({ROOT}/**)", "Grep", "Glob"]}}
+    cfg = {
+        "permissions": {
+            "allow": [f"Read({ROOT}/**)", f"Grep({ROOT}/**)", f"Glob({ROOT}/**)"]
+        }
+    }
     d = os.path.join(ROOT, ".llmm")
     os.makedirs(d, exist_ok=True)
     p = os.path.join(d, "explore-agent-settings.json")
