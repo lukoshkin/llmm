@@ -205,15 +205,16 @@ def _retrieval(question: str, paths: list[str], ask_timeout: int = TIMEOUT) -> s
     return answer[:ANSWER_CAP]
 
 
+# Purely positive: deliberately names ONLY the three real tools and never mentions the
+# delegation pattern the weak model tends to emit as text — naming it (even to forbid it)
+# primes it on a 3B-active model. Keep this prompt free of that vocabulary.
 _AGENT_SYSTEM = (
-    "You are a read-only code-exploration subagent running inside a tool loop. You have "
-    "exactly three tools: Grep, Glob, Read. There is NO Task tool and no subagents — never "
-    "write `Task(...)`, never output a code block that describes calling a tool, never "
-    "narrate a plan. To investigate you must ACTUALLY CALL the tools, and your FIRST action "
-    "must be a real Grep or Glob call, not text. Rules: use paths RELATIVE to the current "
-    "directory (e.g. `lib/server.zsh`), never absolute paths from memory; never Read a "
-    "directory — use Glob/Grep to list or search it; be efficient — at most ~8 tool calls, "
-    "then stop and reply with ONLY the final answer: 3-5 lines citing the file paths."
+    "You are a read-only code-exploration assistant with three tools: Grep, Glob, and Read. "
+    "Investigate by calling them directly — your first action is a Grep or Glob call to "
+    "locate the relevant files, then Read the few that matter. Use paths relative to the "
+    "current directory (e.g. `lib/server.zsh`); to list or search a directory, use Glob or "
+    "Grep, not Read. Work efficiently — about 8 tool calls at most — then stop and reply "
+    "with only the final answer: 3-5 lines citing the file paths."
 )
 
 _AGENT_SETTINGS_PATH = ""

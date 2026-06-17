@@ -133,6 +133,18 @@ failure:
 Conclusion: agent mode is viable but unreliable and slow; `retrieval` stays the
 default and agent mode is an opt-in experiment.
 
+**Why the `Task(...)`-as-text reflex (and the prompt fix).** The model never
+actually *invokes* `Task` — it emits `Task(...)` as plain **text**, because the
+structured tool-call format for `Task` was never in its fine-tuning (only the
+textual shape was). Crucially, the only place "Task" reached the nested session
+was *our own* system prompt forbidding it ("there is NO Task tool, never write
+`Task(...)`") — and on a 3B-active model, naming the token primes it more than the
+negation suppresses it ("don't think of an elephant"). The sub-agent prompt was
+rewritten **purely positive**, naming only Grep/Glob/Read and containing no
+"Task"/"subagent"/"never" vocabulary at all, to stop feeding the cue. Expected to
+reduce — not necessarily eliminate — the reflex, since "explore the codebase" is
+itself a trigger.
+
 ### Open items
 
 1. Does the repo-confined allow-list (`--permission-mode default` + `--settings`)
