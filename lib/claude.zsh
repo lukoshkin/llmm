@@ -17,6 +17,15 @@ claude::lean_prompt() {
   print -r -- "$p"
 }
 
+# claude::subagent_addendum -> path to the Task-usage guidance appended to the lean
+# prompt only when LLMM_SUBAGENTS=1 (kept out of the base prompt so it never names an
+# absent tool). Override with LLMM_SUBAGENT_PROMPT.
+claude::subagent_addendum() {
+  local p="${LLMM_SUBAGENT_PROMPT:-$LLMM_ROOT/prompts/lean-subagent.md}"
+  [[ -f "$p" ]] || ui::die "subagent prompt addendum not found: $p"
+  print -r -- "$p"
+}
+
 # claude::compact_pct -> validated auto-compact threshold percentage (integer 1..99).
 claude::compact_pct() {
   local pct="${LLMM_COMPACT_PCT:-80}"
@@ -138,6 +147,10 @@ claude::launch() {
     cargs+=(--tools "${leantools[@]}")
     # --system-prompt-file is a flag, so it terminates the variadic --tools list.
     cargs+=(--system-prompt-file "$prompt")
+    # Only when subagents are on: append Task-usage guidance. Kept OUT of the base
+    # prompt so it never names an absent tool (which confuses a weak model when off).
+    [[ "${LLMM_SUBAGENTS:-0}" == 1 ]] && \
+      cargs+=(--append-system-prompt "$(<"$(claude::subagent_addendum)")")
   fi
   if [[ -n "${LLMM_DRYRUN:-}" ]]; then
     local x
