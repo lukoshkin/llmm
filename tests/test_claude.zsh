@@ -24,7 +24,22 @@ assert_contains "$out" "ARG Bash" "lean keeps Bash"
 assert_contains "$out" "ARG TodoWrite" "lean keeps TodoWrite"
 assert_contains "$out" "ARG ExitPlanMode" "lean keeps ExitPlanMode for plan mode"
 assert_contains "$out" "ARG --system-prompt-file" "lean replaces system prompt via file"
-assert_not_contains "$out" "ARG --mcp-config" "lean omits --mcp-config when LLMM_MCP_CONFIG unset"
+# Scratchpad is default-on: it adds --settings and its own --mcp-config.
+assert_contains "$out" "ARG --settings" "lean wires scratchpad --settings"
+assert_contains "$out" "ARG --mcp-config" "lean wires scratchpad --mcp-config"
+assert_contains "$out" ".llmm/hooks." "lean settings path points at .llmm"
+assert_contains "$out" ".llmm/mcp." "lean mcp path points at .llmm"
+
+# Disabling the scratchpad removes both wires.
+typeset out_ns
+out_ns="$(LLMM_SCRATCHPAD=0 LLMM_DRYRUN=1 claude::launch a 11111 1 65536 2>&1)"
+assert_not_contains "$out_ns" "ARG --settings" "LLMM_SCRATCHPAD=0 drops --settings"
+assert_not_contains "$out_ns" "ARG --mcp-config" "LLMM_SCRATCHPAD=0 drops --mcp-config"
+
+# Subagents opt-in adds Task; default keeps it off (line 28 already asserts default-off).
+typeset out_sa
+out_sa="$(LLMM_SUBAGENTS=1 LLMM_DRYRUN=1 claude::launch a 11111 1 65536 2>&1)"
+assert_contains "$out_sa" "ARG Task" "LLMM_SUBAGENTS=1 re-admits Task"
 assert_not_contains "$out" "ARG Task" "lean drops Task/subagents"
 assert_not_contains "$out" "ARG WebSearch" "lean drops WebSearch"
 

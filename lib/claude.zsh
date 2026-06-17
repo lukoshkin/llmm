@@ -93,7 +93,28 @@ claude::launch() {
       [[ -f "$LLMM_MCP_CONFIG" ]] || ui::die "LLMM_MCP_CONFIG not found: $LLMM_MCP_CONFIG"
       cargs+=(--mcp-config "$LLMM_MCP_CONFIG")
     fi
-    cargs+=(--tools "${CLAUDE_LEAN_TOOLS[@]}")
+    # Scratchpad: generate per-session hooks + mcp config and wire them in. These
+    # explicit flags survive --bare. Default-on; LLMM_SCRATCHPAD=0 opts out.
+    if [[ "${LLMM_SCRATCHPAD:-1}" == 1 ]]; then
+      local sid scratch hooks mcp
+      sid="$(claude::session_id)"
+      scratch="$PWD/.llmm"
+      hooks="$scratch/hooks.$sid.json"
+      mcp="$scratch/mcp.$sid.json"
+      if [[ -z "${LLMM_DRYRUN:-}" ]]; then
+        mkdir -p "$scratch"
+        claude::write_hooks_json "$scratch" "$sid" "$ctx" "$pct" >/dev/null
+        claude::write_mcp_json "$scratch" "$sid" >/dev/null
+        grep -qxF '.llmm/' .gitignore 2>/dev/null || \
+          { [[ -d .git || -f .gitignore ]] && print -- '.llmm/' >> .gitignore; }
+        trap "rm -f ${(q)hooks} ${(q)mcp}" EXIT
+      fi
+      cargs+=(--settings "$hooks" --mcp-config "$mcp")
+    fi
+    # Tool list: lean core, plus Task when subagents are opted in.
+    local -a leantools=("${CLAUDE_LEAN_TOOLS[@]}")
+    [[ "${LLMM_SUBAGENTS:-0}" == 1 ]] && leantools+=(Task)
+    cargs+=(--tools "${leantools[@]}")
     # --system-prompt-file is a flag, so it terminates the variadic --tools list.
     cargs+=(--system-prompt-file "$prompt")
   fi
