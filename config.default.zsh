@@ -18,6 +18,17 @@ LLMM_MCP_CONFIG=${LLMM_MCP_CONFIG:-}
 LLMM_SYSTEM_PROMPT=${LLMM_SYSTEM_PROMPT:-}
 # Auto-compact threshold, percent of the window (lean only). 80 => compact near 80%.
 LLMM_COMPACT_PCT=${LLMM_COMPACT_PCT:-80}
+# Scratchpad: session-scoped structured findings file that survives autocompaction.
+# Re-enables a Stop hook + a tiny MCP server under lean mode (via explicit --settings /
+# --mcp-config, which survive --bare). On by default in lean mode.
+LLMM_SCRATCHPAD=${LLMM_SCRATCHPAD:-1}
+# % of the context window at which the Stop hook forces a checkpoint. Keep BELOW the
+# autocompaction trigger so the save lands before compaction fires.
+LLMM_SCRATCHPAD_PCT=${LLMM_SCRATCHPAD_PCT:-85}
+# Re-admit the Task tool for isolated read-only exploration subagents. Off by default:
+# adds ~1-2K tokens of tool description and depends on general-purpose being reachable
+# under --bare (verify before relying on it).
+LLMM_SUBAGENTS=${LLMM_SUBAGENTS:-0}
 # Per-launch window override is `llmm --ctx N`; the persistent default lives in
 # LLMM_PROFILES below (default.ctx_size). Raise it on machines with more RAM.
 
