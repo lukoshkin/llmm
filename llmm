@@ -42,6 +42,10 @@ llmm::start_path() {  # <profile> <lean> [extra claude args...]
   local model="$LLMM_MODEL"
   if [[ -n "${LLMM_PICK:-}" ]]; then
     model="$(models::pick)" || exit 1
+  else
+    # Default model is an HF repo spec; prefer an already-downloaded local .gguf
+    # of the same model so we launch with --model instead of re-downloading.
+    model="$(models::resolve_local "$model")"
   fi
   # Alias is always derived from the model (Qwen3-Coder-Next-UD-Q3_K_M form).
   local alias="$(models::alias_for "$model")"

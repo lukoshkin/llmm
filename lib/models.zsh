@@ -56,6 +56,22 @@ models::discover() {
   done | sort -u
 }
 
+# models::resolve_local <model> -> if <model> is an HF repo spec but a local .gguf
+# with the same canonical alias is already present, return that local path so the
+# server launches with --model (no re-download). Otherwise return <model> unchanged.
+# A real file path is returned as-is.
+models::resolve_local() {
+  local m="$1"
+  [[ -f "$m" ]] && { print -r -- "$m"; return 0; }
+  local want; want="$(models::alias_for "$m")"
+  local f
+  for f in ${(f)"$(models::discover)"}; do
+    [[ -n "$f" ]] || continue
+    if [[ "$(models::alias_for "$f")" == "$want" ]]; then print -r -- "$f"; return 0; fi
+  done
+  print -r -- "$m"
+}
+
 # models::pick -> echoes a chosen model path, rc 1 on abort/none.
 models::pick() {
   local -a models
