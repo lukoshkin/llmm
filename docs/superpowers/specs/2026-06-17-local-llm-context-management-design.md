@@ -274,9 +274,19 @@ Scratchpad files are ephemeral session state, not project history.
 
 ## Open Implementation Risks
 
+> **Phase 1 implementation status (2026-06-17):** built and unit-tested (124 harness
+> assertions green). Settled during build: `FastMCP` resolves at `mcp.server.fastmcp`
+> under `uv run --with mcp` (the version-sensitive import is correct as written). The
+> launch path exec()s claude, so the originally-planned EXIT-trap cleanup of per-session
+> config files never fires — replaced with `claude::reap_stale`, which reaps only
+> dead-PID config files at the next launch (concurrency-safe) and leaves the scratchpad
+> `.md`. Both config writers now refuse to write through a pre-planted symlink. The items
+> below still require **one live session** against the local server to confirm/calibrate.
+
 - **JSONL token field path:** `usage.input_tokens` is the assumed field for the last-message
-  token count in Claude Code's transcript format. Verify against an actual transcript before
-  finalizing `stop.sh`; adjust the `jq` filter if the schema differs.
+  token count in Claude Code's transcript format. `stop.sh` already falls back across
+  `.message.usage.input_tokens` then `.usage.input_tokens`, but the live path is still
+  unconfirmed — inspect an actual transcript and tighten the `jq` filter if neither matches.
 - **`CLAUDE_CODE_MAX_CONTEXT_TOKENS` availability:** confirmed set by llmm lean mode; the
   Stop hook command bakes it in explicitly so it's available regardless of hook env
   inheritance.
