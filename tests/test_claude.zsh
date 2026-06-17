@@ -57,3 +57,25 @@ assert_rc 1 "$( (LLMM_COMPACT_PCT=150 LLMM_DRYRUN=1 claude::launch a 1 1 100) >/
 assert_rc 1 "$( (LLMM_COMPACT_PCT=abc LLMM_DRYRUN=1 claude::launch a 1 1 100) >/dev/null 2>&1; print $? )" "non-integer compact pct dies"
 assert_rc 1 "$( (LLMM_SYSTEM_PROMPT=/no/such/prompt.md LLMM_DRYRUN=1 claude::launch a 1 1 100) >/dev/null 2>&1; print $? )" "missing prompt override dies"
 assert_rc 1 "$( (LLMM_MCP_CONFIG=/no/such/mcp.json LLMM_DRYRUN=1 claude::launch a 1 1 100) >/dev/null 2>&1; print $? )" "missing mcp config dies"
+
+# --- session id is non-empty and shell-safe ---
+typeset _sid; _sid="$(claude::session_id)"
+assert_eq "$([[ -n "$_sid" && "$_sid" != *[^A-Za-z0-9_]* ]] && print ok)" ok "session id is safe"
+
+# --- write_hooks_json produces a valid hooks file wired to the hook scripts ---
+typeset _wd; _wd="$(mktemp -d)/.llmm"; mkdir -p "$_wd"
+typeset _hf; _hf="$(claude::write_hooks_json "$_wd" testid 65536 85)"
+assert_eq "$([[ -f "$_hf" ]] && print yes)" yes "hooks json written"
+typeset _hj; _hj="$(cat "$_hf")"
+assert_contains "$_hj" "stop.sh" "hooks json wires stop.sh"
+assert_contains "$_hj" "session_start.sh" "hooks json wires session_start.sh"
+assert_contains "$_hj" '"matcher": "compact"' "hooks json uses compact matcher"
+assert_contains "$_hj" "CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536" "hooks json bakes max tokens"
+assert_contains "$_hj" "LLMM_SCRATCHPAD_PCT=85" "hooks json bakes pct"
+
+# --- write_mcp_json points uv at the scratchpad server with session args ---
+typeset _mf; _mf="$(claude::write_mcp_json "$_wd" testid)"
+typeset _mj; _mj="$(cat "$_mf")"
+assert_contains "$_mj" "scratchpad_server.py" "mcp json points at server"
+assert_contains "$_mj" "--with" "mcp json uses uv run --with mcp"
+assert_contains "$_mj" "--session-id" "mcp json passes session id"

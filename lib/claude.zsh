@@ -26,6 +26,41 @@ claude::compact_pct() {
   print -r -- "$pct"
 }
 
+# claude::session_id -> shell-safe unique-ish id for this launch.
+claude::session_id() { print -r -- "$(date +%Y%m%d_%H%M%S)_$$"; }
+
+# claude::write_hooks_json <scratchpad_dir> <id> <ctx> <pct> -> prints the file path.
+claude::write_hooks_json() {
+  local dir="$1" id="$2" ctx="$3" pct="$4"
+  local hd="$LLMM_ROOT/lib/hooks" f="$1/hooks.$2.json"
+  cat > "$f" <<JSON
+{
+  "hooks": {
+    "Stop": [{"hooks": [{"type": "command", "command": "LLMM_SCRATCHPAD_PCT=$pct CLAUDE_CODE_MAX_CONTEXT_TOKENS=$ctx $hd/stop.sh"}]}],
+    "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": "$hd/session_start.sh $dir $id"}]}]
+  }
+}
+JSON
+  print -r -- "$f"
+}
+
+# claude::write_mcp_json <scratchpad_dir> <id> -> prints the file path.
+claude::write_mcp_json() {
+  local dir="$1" id="$2"
+  local hd="$LLMM_ROOT/lib/hooks" f="$1/mcp.$2.json"
+  cat > "$f" <<JSON
+{
+  "mcpServers": {
+    "scratchpad": {
+      "command": "uv",
+      "args": ["run", "--with", "mcp", "python3", "$hd/scratchpad_server.py", "--session-id", "$id", "--scratchpad-dir", "$dir"]
+    }
+  }
+}
+JSON
+  print -r -- "$f"
+}
+
 # claude::launch <alias> <port> <lean> <ctx> [claude args...]
 # lean: 1 = lean session, 0 = full. ctx: effective context window (config::ctx_size).
 # With LLMM_DRYRUN set, prints the assembled env/args (one per line) and returns
