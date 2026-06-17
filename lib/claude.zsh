@@ -26,6 +26,16 @@ claude::subagent_addendum() {
   print -r -- "$p"
 }
 
+# claude::explore_addendum -> path to the explore-tool guidance prepended to the lean
+# prompt when subagents are off (LLMM_SUBAGENTS != 1, the default). The weak local model
+# will not emit Task calls but does call MCP tools, so explore is the delegation channel
+# it actually uses. Override with LLMM_EXPLORE_PROMPT.
+claude::explore_addendum() {
+  local p="${LLMM_EXPLORE_PROMPT:-$LLMM_ROOT/prompts/lean-explore.md}"
+  [[ -f "$p" ]] || ui::die "explore prompt addendum not found: $p"
+  print -r -- "$p"
+}
+
 # claude::compact_pct -> validated auto-compact threshold percentage (integer 1..99).
 claude::compact_pct() {
   local pct="${LLMM_COMPACT_PCT:-80}"
@@ -54,18 +64,32 @@ JSON
   print -r -- "$f"
 }
 
-# claude::write_mcp_json <scratchpad_dir> <id> -> prints the file path.
+# claude::write_mcp_json <dir> <id> <want_scratch> <want_explore> <port> <alias>
+# Emits the per-session MCP config with each server included independently, and prints
+# the file path. The scratchpad server (checkpoint/recall) and the explore server are
+# gated separately so either can be on without the other. Repo root for explore is the
+# parent of the .llmm dir.
 claude::write_mcp_json() {
-  local dir="$1" id="$2"
-  local hd="$LLMM_ROOT/lib/hooks" f="$1/mcp.$2.json"
+  local dir="$1" id="$2" want_scratch="$3" want_explore="$4" port="$5" alias="$6"
+  local hd="$LLMM_ROOT/lib/hooks" f="$dir/mcp.$id.json" root="${dir:h}"
   [[ -L "$f" ]] && ui::die "refusing to write through symlink: $f"
+  local -a entries
+  if [[ "$want_scratch" == 1 ]]; then
+    entries+=('    "scratchpad": {
+      "command": "uv",
+      "args": ["run", "--with", "mcp", "python3", "'"$hd"'/scratchpad_server.py", "--session-id", "'"$id"'", "--scratchpad-dir", "'"$dir"'"]
+    }')
+  fi
+  if [[ "$want_explore" == 1 ]]; then
+    entries+=('    "explore": {
+      "command": "uv",
+      "args": ["run", "--with", "mcp", "python3", "'"$hd"'/explore_server.py", "--base-url", "http://127.0.0.1:'"$port"'", "--model", "'"$alias"'", "--root", "'"$root"'"]
+    }')
+  fi
   cat > "$f" <<JSON
 {
   "mcpServers": {
-    "scratchpad": {
-      "command": "uv",
-      "args": ["run", "--with", "mcp", "python3", "$hd/scratchpad_server.py", "--session-id", "$id", "--scratchpad-dir", "$dir"]
-    }
+${(pj:,\n:)entries}
   }
 }
 JSON
@@ -123,37 +147,47 @@ claude::launch() {
       [[ -f "$LLMM_MCP_CONFIG" ]] || ui::die "LLMM_MCP_CONFIG not found: $LLMM_MCP_CONFIG"
       cargs+=(--mcp-config "$LLMM_MCP_CONFIG")
     fi
-    # Scratchpad: generate per-session hooks + mcp config and wire them in. These
-    # explicit flags survive --bare. Default-on; LLMM_SCRATCHPAD=0 opts out.
-    if [[ "${LLMM_SCRATCHPAD:-1}" == 1 ]]; then
-      local sid scratch hooks mcp
+    # MCP servers (explicit flags survive --bare). Two independent servers:
+    #   scratchpad (checkpoint/recall)  — on unless LLMM_SCRATCHPAD=0
+    #   explore     (delegated search)  — on unless subagents are opted in (LLMM_SUBAGENTS=1),
+    #                                      since Task replaces it there
+    # They share one per-session mcp.json; --settings (Stop/SessionStart hooks) is
+    # scratchpad-only. The whole block engages if either server is wanted.
+    local want_scratch=0 want_explore=0
+    [[ "${LLMM_SCRATCHPAD:-1}" == 1 ]] && want_scratch=1
+    [[ "${LLMM_SUBAGENTS:-0}" != 1 ]] && want_explore=1
+    if (( want_scratch || want_explore )); then
+      local sid scratch mcp
       sid="$(claude::session_id)"
       scratch="$PWD/.llmm"
-      hooks="$scratch/hooks.$sid.json"
       mcp="$scratch/mcp.$sid.json"
       if [[ -z "${LLMM_DRYRUN:-}" ]]; then
         mkdir -p "$scratch"
         claude::reap_stale "$scratch"   # exec() below kills any EXIT trap; reap here instead
-        claude::write_hooks_json "$scratch" "$sid" "$ctx" "$pct" >/dev/null
-        claude::write_mcp_json "$scratch" "$sid" >/dev/null
+        claude::write_mcp_json "$scratch" "$sid" "$want_scratch" "$want_explore" "$port" "$alias" >/dev/null
         grep -qxF '.llmm/' .gitignore 2>/dev/null || \
           { [[ -d .git || -f .gitignore ]] && print -- '.llmm/' >> .gitignore; }
       fi
-      cargs+=(--settings "$hooks" --mcp-config "$mcp")
+      cargs+=(--mcp-config "$mcp")
+      if (( want_scratch )); then
+        local hooks="$scratch/hooks.$sid.json"
+        [[ -z "${LLMM_DRYRUN:-}" ]] && claude::write_hooks_json "$scratch" "$sid" "$ctx" "$pct" >/dev/null
+        cargs+=(--settings "$hooks")
+      fi
     fi
     # Tool list: lean core, plus Task when subagents are opted in.
     local -a leantools=("${CLAUDE_LEAN_TOOLS[@]}")
     [[ "${LLMM_SUBAGENTS:-0}" == 1 ]] && leantools+=(Task)
     cargs+=(--tools "${leantools[@]}")
-    # System prompt. With subagents off: the base lean prompt via --system-prompt-file
-    # (it must never name an absent tool). With subagents on: prepend the Task-usage
-    # addendum so the delegation rule sits at the TOP of the prompt (max salience for a
-    # weak model), passed inline via --system-prompt (a flag, so it still terminates the
-    # variadic --tools list above).
+    # System prompt. The base lean prompt must never name an absent tool, so the
+    # delegation guidance is a separate addendum prepended inline (top placement = max
+    # salience for a weak model; --system-prompt is a flag, so it still terminates the
+    # variadic --tools list above). Subagents on -> Task addendum; otherwise -> explore
+    # addendum (the MCP-channel delegation the model actually uses).
     if [[ "${LLMM_SUBAGENTS:-0}" == 1 ]]; then
       cargs+=(--system-prompt "$(<"$(claude::subagent_addendum)")"$'\n\n'"$(<"$prompt")")
     else
-      cargs+=(--system-prompt-file "$prompt")
+      cargs+=(--system-prompt "$(<"$(claude::explore_addendum)")"$'\n\n'"$(<"$prompt")")
     fi
   fi
   if [[ -n "${LLMM_DRYRUN:-}" ]]; then

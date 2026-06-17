@@ -27,31 +27,38 @@ assert_contains "$out" "ARG --tools" "lean passes --tools"
 assert_contains "$out" "ARG Bash" "lean keeps Bash"
 assert_contains "$out" "ARG TodoWrite" "lean keeps TodoWrite"
 assert_contains "$out" "ARG ExitPlanMode" "lean keeps ExitPlanMode for plan mode"
-assert_contains "$out" "ARG --system-prompt-file" "lean replaces system prompt via file"
+# Default lean (subagents off) prepends the explore addendum inline, not the base
+# prompt via --system-prompt-file.
+assert_not_contains "$out" "ARG --system-prompt-file" "default lean uses inline --system-prompt (explore addendum on top)"
+assert_contains "$out" "explore(" "default lean injects the explore-tool guidance"
 # Scratchpad is default-on: it adds --settings and its own --mcp-config.
 assert_contains "$out" "ARG --settings" "lean wires scratchpad --settings"
 assert_contains "$out" "ARG --mcp-config" "lean wires scratchpad --mcp-config"
 assert_contains "$out" ".llmm/hooks." "lean settings path points at .llmm"
 assert_contains "$out" ".llmm/mcp." "lean mcp path points at .llmm"
 
-# Disabling the scratchpad removes both wires.
+# Disabling the scratchpad drops the hooks (--settings) but explore (default-on) still
+# wires --mcp-config. Both wires drop only when explore is also off (subagents on).
 typeset out_ns
 out_ns="$(LLMM_SCRATCHPAD=0 LLMM_DRYRUN=1 claude::launch a 11111 1 65536 2>&1)"
 assert_not_contains "$out_ns" "ARG --settings" "LLMM_SCRATCHPAD=0 drops --settings"
-assert_not_contains "$out_ns" "ARG --mcp-config" "LLMM_SCRATCHPAD=0 drops --mcp-config"
+assert_contains "$out_ns" "ARG --mcp-config" "LLMM_SCRATCHPAD=0 keeps --mcp-config (explore)"
+typeset out_none
+out_none="$(LLMM_SCRATCHPAD=0 LLMM_SUBAGENTS=1 LLMM_DRYRUN=1 claude::launch a 11111 1 65536 2>&1)"
+assert_not_contains "$out_none" "ARG --settings" "scratchpad+explore both off drops --settings"
+assert_not_contains "$out_none" "ARG --mcp-config" "scratchpad+explore both off drops --mcp-config"
 
-# Subagents opt-in adds Task; default keeps it off (line 28 already asserts default-off).
+# Subagents opt-in (LLMM_SUBAGENTS=1) swaps explore for Task: adds Task to --tools,
+# prepends the Task addendum (worked example) inline, and drops the explore guidance.
 typeset out_sa
 out_sa="$(LLMM_SUBAGENTS=1 LLMM_DRYRUN=1 claude::launch a 11111 1 65536 2>&1)"
 assert_contains "$out_sa" "ARG Task" "LLMM_SUBAGENTS=1 re-admits Task"
-# Subagents on => Task addendum is prepended via inline --system-prompt (top placement),
-# carrying a literal worked Task(...) example. Off => base prompt via --system-prompt-file,
-# no Task mention at all.
 assert_contains "$out_sa" "subagent_type" "subagents-on injects the worked Task example"
 assert_contains "$out_sa" "Task tool" "subagents-on guidance names the Task tool"
 assert_not_contains "$out_sa" "ARG --system-prompt-file" "subagents-on uses inline --system-prompt (addendum on top)"
+assert_not_contains "$out_sa" "explore(" "subagents-on drops the explore guidance"
 assert_not_contains "$out" "subagent_type" "default lean omits Task guidance entirely"
-assert_not_contains "$out" "ARG Task" "lean drops Task/subagents"
+assert_not_contains "$out" "ARG Task" "default lean drops Task/subagents"
 assert_not_contains "$out" "ARG WebSearch" "lean drops WebSearch"
 
 # --- full build: none of the lean flags, no window env ---
@@ -102,12 +109,27 @@ assert_contains "$_hj" '"matcher": "compact"' "hooks json uses compact matcher"
 assert_contains "$_hj" "CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536" "hooks json bakes max tokens"
 assert_contains "$_hj" "LLMM_SCRATCHPAD_PCT=85" "hooks json bakes pct"
 
-# --- write_mcp_json points uv at the scratchpad server with session args ---
-typeset _mf; _mf="$(claude::write_mcp_json "$_wd" testid)"
+# --- write_mcp_json includes each server independently and stays valid JSON ---
+# both servers on
+typeset _mf; _mf="$(claude::write_mcp_json "$_wd" testid 1 1 11111 myalias)"
 typeset _mj; _mj="$(cat "$_mf")"
-assert_contains "$_mj" "scratchpad_server.py" "mcp json points at server"
+assert_contains "$_mj" "scratchpad_server.py" "mcp json points at scratchpad server"
+assert_contains "$_mj" "explore_server.py" "mcp json points at explore server"
 assert_contains "$_mj" "--with" "mcp json uses uv run --with mcp"
 assert_contains "$_mj" "--session-id" "mcp json passes session id"
+assert_contains "$_mj" "127.0.0.1:11111" "explore entry carries the server base url"
+assert_contains "$_mj" "myalias" "explore entry carries the model alias"
+assert_eq "$(python3 -m json.tool "$_mf" >/dev/null 2>&1 && print ok)" ok "both-server mcp json is valid"
+# scratchpad only
+_mf="$(claude::write_mcp_json "$_wd" sconly 1 0 11111 a)"; _mj="$(cat "$_mf")"
+assert_contains "$_mj" "scratchpad_server.py" "scratchpad-only includes scratchpad"
+assert_not_contains "$_mj" "explore_server.py" "scratchpad-only omits explore"
+assert_eq "$(python3 -m json.tool "$_mf" >/dev/null 2>&1 && print ok)" ok "scratchpad-only mcp json is valid"
+# explore only
+_mf="$(claude::write_mcp_json "$_wd" exonly 0 1 11111 a)"; _mj="$(cat "$_mf")"
+assert_contains "$_mj" "explore_server.py" "explore-only includes explore"
+assert_not_contains "$_mj" "scratchpad_server.py" "explore-only omits scratchpad"
+assert_eq "$(python3 -m json.tool "$_mf" >/dev/null 2>&1 && print ok)" ok "explore-only mcp json is valid"
 
 # --- reap_stale removes dead-PID configs, keeps live-PID configs + the scratchpad .md ---
 # (launch exec()s claude, so the EXIT trap never fires; reap_stale is the real cleanup.)

@@ -18,6 +18,31 @@ task-by-task plans alongside them.
 curl -fsSL https://raw.githubusercontent.com/lukoshkin/llmm/master/install.sh | bash
 ```
 
+`install.sh` builds `llama-server` from source and wires up the `llmm` command. It
+is idempotent and self-managing (`llmm update` / `llmm update --local`).
+
+### Prerequisites
+
+**Required before install** (the installer hard-fails without these):
+
+- **git** and **curl** — clone/build and model downloads.
+- **cmake** — builds `llama.cpp` (`brew install cmake`, or `apt/dnf install cmake`).
+- **A C/C++ toolchain** — macOS: `xcode-select --install`; Linux: `build-essential`
+  / `gcc`+`g++`.
+- **zsh** — `llmm` runs under zsh at runtime (the installer warns if it's missing).
+
+**Auto-installed if absent** (the installer sets these up; failures degrade gracefully):
+
+- **uv** (Astral) — used to install **`hf`** (the `huggingface_hub` CLI) for model
+  downloads, and to run the MCP helper servers (`uv run --with mcp`). If uv can't be
+  installed, model pulls fall back to llama.cpp's built-in `--hf-repo` download.
+
+**Optional:**
+
+- **fzf** — nicer `llmm pick`; without it you get a numbered menu.
+- **Backend toolkits (Linux)** — `--backend cuda` needs the CUDA toolkit (`nvcc`);
+  `--backend vulkan` needs the Vulkan SDK. macOS uses **Metal** automatically.
+
 ---
 
 ## The problem: Claude Code expects a frontier model and a huge window
@@ -46,7 +71,7 @@ some server-side trims. `llmm --full` opts out; `llmm --lean` forces it.
 
 | Lever | What lean does | Why |
 |-------|----------------|-----|
-| **Built-in tools** | `--tools Bash Read Edit Write Grep Glob TodoWrite ExitPlanMode` | Drops Task/subagents, web, notebooks, LSP, etc. — the bulk of the ~24K tool overhead. |
+| **Built-in tools** | `--tools Bash Read Edit Write Grep Glob TodoWrite ExitPlanMode` | Drops the built-in Task/subagents, web, notebooks, LSP, etc. — the bulk of the ~24K tool overhead. Exploration is delegated through an MCP `explore` tool instead (see [Delegated exploration](#delegated-exploration)). |
 | **MCP** | `--strict-mcp-config` with no `--mcp-config` → all MCP dropped (opt back in via `LLMM_MCP_CONFIG`) | Recovers ~17K of schemas; context7's doc dumps also swamp a small window. |
 | **Skills/hooks/LSP/plugins/auto-memory** | `--bare` | Removes the rest of the framework overhead. |
 | **System prompt** | `--system-prompt-file prompts/lean-coder.md` (replace, not append) | A terse, Qwen-tuned prompt (~500 words) instead of the ~3–4K default. Because the replacement drops everything the default prompt carried, it **re-adds the bits worth keeping explicitly** — notably a plan-mode contract (investigate read-only → write the plan to `docs/plans/<task>.md` → `ExitPlanMode` → wait for approval). |
@@ -56,6 +81,51 @@ some server-side trims. `llmm --full` opts out; `llmm --lean` forces it.
 **Net effect:** fixed overhead drops from ~50K to **~1.8K measured** (system prompt
 ~0.6K, tools ~1.2K, no MCP/memory/skills), leaving essentially the whole local
 window for actual work.
+
+## Delegated exploration
+
+Exploring a codebase ("find where X is configured", "trace how Y works") is exactly
+the work that floods a small window — many `Read`/`Grep` calls whose bulky output
+lives in context long after it's useful. Frontier Claude solves this with the `Task`
+tool: spin up a subagent with its own context, let it explore, get back a short
+answer. We wanted the same for the local model. It didn't work out as planned, and
+the workaround is worth documenting.
+
+**1. We tried `Task` first.** Re-admitting the built-in `Task` tool is mechanically
+fine under `--bare` — the tool is reachable and the subagent runs. But
+**Qwen3-Coder-Next will not emit `Task` calls.** Delegation/orchestration is absent
+from its fine-tuning, so it narrates "I'll use the Task tool…" and then calls `Read`
+itself anyway, or even confabulates a config step to "enable" subagents (there is
+nothing to enable). Prompt hardening — putting the rule first, with a literal worked
+`Task(...)` example — got it to *talk* about `Task` but never to *call* it. This is a
+model capability gap, not a wiring bug.
+
+**2. The workaround: an MCP `explore` tool.** The same model *reliably* calls MCP
+tools — it proactively uses the scratchpad `checkpoint`/`recall` because their
+request/response shape is in-distribution. So we expose exploration through that
+channel. `explore(question, paths=[])` runs a small stdio MCP server
+(`lib/hooks/explore_server.py`) that:
+
+- gathers context **in its own process** — reads the `paths` you hint (files/globs),
+  or greps the repo for terms from the question, under a char budget; then
+- makes **one** call to the already-running `llama-server` and returns a concise
+  3–5 line answer that cites files.
+
+The bulky file contents never enter the main session — you spend a tiny tool call
+plus a short answer instead of a dozen `Read`s. It's not a full isolated subagent
+(that's a possible v2), but it delivers the context-isolation benefit through a
+channel the model actually uses.
+
+**The `LLMM_SUBAGENTS` switch** (default `0`) picks between the two, mutually
+exclusively:
+
+| `LLMM_SUBAGENTS` | What you get |
+|------------------|--------------|
+| `0` *(default)* | The `explore` MCP tool is wired in and the lean prompt is prepended with explore-usage guidance. No `Task`. |
+| `1` | The built-in `Task` tool is re-admitted (`--tools … Task`) with the Task-usage addendum instead, and `explore` is dropped. Kept as an opt-in for stronger local models that *can* drive `Task`. |
+
+(`explore` is independent of the scratchpad: `LLMM_SCRATCHPAD=0` turns off the
+checkpoint hooks but leaves `explore` wired when subagents are off.)
 
 ## Known limitations
 
@@ -117,6 +187,8 @@ staying off the swap.
 ## See also
 
 - [`../README.md`](../README.md) — install, commands, config keys, storage layout.
-- `prompts/lean-coder.md` — the slim system prompt.
+- `prompts/lean-coder.md` — the slim system prompt; `prompts/lean-explore.md` /
+  `prompts/lean-subagent.md` — the delegation addenda for the two `LLMM_SUBAGENTS` modes.
 - `lib/claude.zsh` — the lean/full launch seam.
+- `lib/hooks/explore_server.py` — the MCP `explore` server (delegated exploration).
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — design and build history.

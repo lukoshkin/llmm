@@ -25,9 +25,13 @@ LLMM_SCRATCHPAD=${LLMM_SCRATCHPAD:-1}
 # % of the context window at which the Stop hook forces a checkpoint. Keep BELOW the
 # autocompaction trigger so the save lands before compaction fires.
 LLMM_SCRATCHPAD_PCT=${LLMM_SCRATCHPAD_PCT:-85}
-# Re-admit the Task tool for isolated read-only exploration subagents. Off by default:
-# adds ~1-2K tokens of tool description and depends on general-purpose being reachable
-# under --bare (verify before relying on it).
+# Delegation strategy for exploration/search. Two mutually exclusive modes:
+#   0 (default) -> expose the `explore` MCP tool (server-side retrieval + one local-model
+#                  summary; isolates bulky file contents from the session). The local model
+#                  reliably calls MCP tools, so this is the channel it actually uses.
+#   1           -> re-admit the built-in Task tool instead (and drop explore). Mechanically
+#                  works under --bare, but Qwen3-Coder will not emit Task calls — kept as an
+#                  opt-in for stronger local models. See README "Delegated exploration".
 LLMM_SUBAGENTS=${LLMM_SUBAGENTS:-0}
 # Developer-only: path to your local llmm working checkout. When set, `llmm update
 # --local` fast-forwards the installed source from it instead of from origin — for
