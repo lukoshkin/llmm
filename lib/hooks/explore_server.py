@@ -52,11 +52,11 @@ MAX_FILE_CHARS = 4000
 BUDGET = 14000
 ANSWER_CAP = 1600
 TIMEOUT = 120
-# Bound the nested agent run. Must stay BELOW the parent's MCP tool-call timeout
-# (llmm sets MCP_TOOL_TIMEOUT=300000 in claude::launch) so the child is killed and we
-# fall back before the parent abandons the tool call and leaves an orphan holding the
-# single llama.cpp slot.
-AGENT_TIMEOUT = 240
+# Bound the nested agent run. The parent's MCP tool-call timeout is observed to be 120s
+# (MCP_TOOL_TIMEOUT did not raise it in this CLI build), so keep this safely BELOW 120s:
+# the child is killed and we fall back to retrieval before the parent abandons the call
+# and leaves an orphan holding the single llama.cpp slot.
+AGENT_TIMEOUT = 90
 
 _STOP = {
     "the",
@@ -203,10 +203,13 @@ def _retrieval(question: str, paths: list[str]) -> str:
 
 
 _AGENT_SYSTEM = (
-    "You are a read-only code-exploration subagent. Investigate the repository with "
-    "Read/Grep/Glob to answer the question, then reply with ONLY the answer: concise "
-    "(3-5 lines), citing the relevant file paths. Do not dump file contents. You cannot "
-    "edit anything."
+    "You are a read-only code-exploration subagent running inside a tool loop. You have "
+    "exactly three tools: Grep, Glob, Read. There is NO Task tool and no subagents — never "
+    "write `Task(...)`, never output a code block that describes calling a tool, never "
+    "narrate a plan. To investigate you must ACTUALLY CALL the tools: start with a Grep or "
+    "Glob to locate the relevant files, Read the few that matter, then reply with ONLY the "
+    "final answer — 3-5 lines citing the file paths. Your first action must be a real Grep "
+    "or Glob tool call, not text."
 )
 
 
@@ -250,11 +253,13 @@ def _agent(question: str, paths: list[str]) -> str:
         CLAUDE_CODE_DISABLE_1M_CONTEXT="1",
         CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1",
     )
-    # default permission mode (not bypass): in headless -p there is no prompt to answer,
-    # so reads outside the working dir are denied while in-repo reads proceed — confining
-    # the child to ROOT without a hard --add-dir allowlist. --output-format text pins
-    # stdout to a bare answer; --strict-mcp-config with no --mcp-config means the child
-    # has no MCP servers (no recursion back into explore).
+    # bypassPermissions: the read-only tools must run unattended in headless -p (default
+    # mode was observed to never reach reads). TRADEOFF: bypass also lets Read take
+    # absolute paths outside ROOT, so this is weaker containment than v1's _in_root — the
+    # loopback + $HOME/'/' guards above and the local-only model are the remaining limits;
+    # a settings-based read deny-rule is the follow-up if we keep agent mode.
+    # --output-format text pins stdout to a bare answer; --strict-mcp-config with no
+    # --mcp-config means the child has no MCP servers (no recursion back into explore).
     cmd = [
         CLAUDE_BIN,
         "-p",
@@ -270,7 +275,7 @@ def _agent(question: str, paths: list[str]) -> str:
         "--model",
         MODEL,
         "--permission-mode",
-        "default",
+        "bypassPermissions",
         "--system-prompt",
         _AGENT_SYSTEM,
     ]

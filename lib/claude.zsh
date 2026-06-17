@@ -143,9 +143,10 @@ claude::launch() {
       CLAUDE_CODE_MAX_CONTEXT_TOKENS="$ctx"
       CLAUDE_CODE_AUTO_COMPACT_WINDOW="$ctx"
       CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="$pct"
-      # Raise the MCP tool-call timeout so a slow local-model tool (notably explore's
-      # agent mode, which runs a nested claude up to AGENT_TIMEOUT=240s) isn't abandoned
-      # mid-call. Kept above explore_server's AGENT_TIMEOUT so the child is reaped first.
+      # Best-effort raise of the MCP tool-call timeout for slow local-model tools. NOTE:
+      # observed not honored in the current CLI build (the client still timed out explore
+      # at 120s), so explore_server's AGENT_TIMEOUT is set BELOW 120s as the real bound
+      # rather than relying on this. Kept in case a future build honors it.
       MCP_TOOL_TIMEOUT=300000
     )
     cargs+=(--bare --strict-mcp-config)

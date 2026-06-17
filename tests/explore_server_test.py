@@ -132,9 +132,9 @@ check(
 )
 check(cmd[cmd.index("--output-format") + 1] == "text", "agent cmd pins text output")
 check(
-    cmd[cmd.index("--permission-mode") + 1] == "default", "agent cmd uses default perms"
+    cmd[cmd.index("--permission-mode") + 1] == "bypassPermissions",
+    "agent cmd lets read-only tools run unattended",
 )
-check("bypassPermissions" not in cmd, "agent cmd does not bypass permissions")
 check(captured["cwd"] == es.ROOT, "agent runs in the repo root")
 
 # nonzero exit falls back to retrieval (which fails on the patched urlopen -> fallback msg)

@@ -79,9 +79,9 @@ paths)` signature is unchanged — and only switches the server's strategy:
 - `retrieval` (v1): gather + one summary call, as above.
 - `agent` (v2): spawn a nested headless `claude -p` in the repo root with
   `--bare --strict-mcp-config --output-format text --tools Read Grep Glob
-  --permission-mode default` and a terse read-only explorer system prompt, env
-  pointed at the local server. The local model drives its own tool loop in an
-  isolated process; stdout is captured and capped.
+  --permission-mode bypassPermissions` and a forceful read-only explorer system
+  prompt, env pointed at the local server. The local model drives its own tool
+  loop in an isolated process; stdout is captured and capped.
 
 The `claude` path is resolved at launch (where PATH is known) and baked into the
 explore server's `mcp.json` args (`--mode`, `--claude-bin`).
@@ -93,35 +93,45 @@ explore server's `mcp.json` args (`--mode`, `--claude-bin`).
   A `_is_loopback()` guard refuses to spawn unless the base URL is
   `127.0.0.1`/`localhost`/`::1`/`0.0.0.0` — a misconfig fails closed (falls back
   to retrieval), it can never silently call `api.anthropic.com`.
-- **Read containment.** `--permission-mode default` (not `bypassPermissions`):
-  in headless `-p` there is no prompt to answer, so reads outside the working dir
-  are denied while in-repo reads proceed — confining the child to `ROOT` without
-  a hard allowlist. `default` mode replacing `bypass` still needs **live
-  confirmation** that in-repo reads actually proceed unattended (the open item
-  below). Agent mode additionally refuses to run when `ROOT` is `$HOME` or `/`.
+- **Read containment (weakened tradeoff).** Started on `--permission-mode
+  default` (headless = no prompt → out-of-repo reads denied), but the first live
+  run showed the child never reached a read at all (see finding below), so it was
+  switched to `bypassPermissions` to let the read-only tools run unattended. That
+  removes v1's hard `_in_root` confinement: `Read` can take absolute paths outside
+  `ROOT`. The remaining limits are the loopback + `$HOME`/`/` guards and the
+  local-only model. A settings-based read deny-rule is the follow-up if agent mode
+  is kept.
 - **No recursion.** `--strict-mcp-config` with no `--mcp-config` → the child has
   no MCP servers, so `explore` cannot re-arm itself.
-- **Timeout coordination.** `AGENT_TIMEOUT=240s` is kept below the parent's MCP
-  tool-call timeout, which llmm raises to `MCP_TOOL_TIMEOUT=300000` in
-  `claude::launch`, so the child is reaped before the parent abandons the call
-  and leaves an orphan on the single `--parallel 1` slot. (No `--max-turns` in
-  this CLI build, so the subprocess timeout is the only bound.)
+- **Timeout coordination.** The MCP tool-call timeout was **observed at 120s** and
+  not raised by `MCP_TOOL_TIMEOUT=300000` (kept best-effort), so `AGENT_TIMEOUT` is
+  set to **90s — below 120s** — as the real bound: the child is reaped and we fall
+  back to retrieval before the parent abandons the call and leaves an orphan on the
+  single `--parallel 1` slot. (No `--max-turns` in this CLI build.)
 - **Diagnosable, not silent.** Every fallback path logs a one-line reason (and a
   stderr tail on nonzero exit) to the server's stderr via `_log()`, so a dead or
   degraded agent mode is visible in Claude Code's MCP logs instead of masquerading
   as working retrieval.
 
-### Open items to confirm on real hardware
+### Live run #1 finding (2026-06-17)
 
-1. Does `--permission-mode default` let the headless child read in-repo files
-   unattended? If it instead denies/stalls, switch to `bypassPermissions` plus a
-   generated `--settings` deny rule for paths outside `ROOT`.
-2. Does the local model sustain a useful multi-step Read/Grep/Glob loop end to
-   end, or stall? This is the capability question agent mode exists to answer.
+The premise — "inside the sub-session it only needs to *use* read tools, which it
+does" — did **not** hold on the first run. The nested model returned a narrated
+`Task(...)` code block as text instead of calling Grep/Glob/Read — reproducing the
+exact Task-refusal that killed the built-in `Task` approach, now one level down. It
+never reached a read (so permission mode was moot), and the parent killed the call
+at the 120s MCP timeout. Fixes applied for run #2: `AGENT_TIMEOUT=90` (clean
+fallback under the 120s ceiling); a much more forceful system prompt ("there is NO
+Task tool; your first action must be a real Grep/Glob call, never narrate");
+`bypassPermissions` to remove the read-permission variable.
 
-Rationale for trying it: the `Task` failure was the model refusing to *emit a
-delegation call*; inside the sub-session it only needs to *use read tools*, which
-it does.
+### Open items
+
+1. Does the hardened prompt get the nested model to actually call Grep/Glob/Read
+   instead of narrating `Task(...)`? If run #2 still narrates, agent mode is a dead
+   end for this model and retrieval stays the only strategy.
+2. If reads do happen, add a settings-based deny-rule to restore `_in_root`-grade
+   containment under `bypassPermissions`.
 
 ## Out of scope
 

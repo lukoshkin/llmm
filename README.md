@@ -120,7 +120,17 @@ plus a short answer instead of a dozen `Read`s.
 | `LLMM_EXPLORE_MODE` | How the server answers |
 |---------------------|------------------------|
 | `retrieval` *(default)* | Greps/reads under a char budget, then **one** local-model summary call. Fast, predictable, one round-trip. |
-| `agent` | Spawns a **nested headless `claude -p`** with read-only tools (`Read`/`Grep`/`Glob`, no MCP) so the local model drives its own exploration loop in an isolated subprocess; its answer is captured. Runs under `--permission-mode default` (headless = no prompt, so out-of-repo reads are denied while in-repo reads proceed), pinned to the local server, and refuses to run against `$HOME`/`/`. Slower (several round-trips on a slow local model) but can chase multi-hop questions retrieval can't. Falls back to `retrieval` if `claude` is missing or the run errors/times out (the reason is logged to the MCP server's stderr). |
+| `agent` | Spawns a **nested headless `claude -p`** with read-only tools (`Read`/`Grep`/`Glob`, no MCP) so the local model drives its own exploration loop in an isolated subprocess; its answer is captured. Pinned to the local server (loopback-guarded), refuses to run against `$HOME`/`/`, bounded at 90s with fallback to `retrieval` (reason logged to the MCP server's stderr). **Experimental — see the caveat below.** |
+
+> **Agent mode is not working yet on this model.** The first live run showed the
+> nested Qwen reproducing the same failure that killed the built-in `Task` tool:
+> it narrated a `Task(...)` block as text instead of calling `Read`/`Grep`/`Glob`,
+> so it returned nothing useful. A harder system prompt is in place for the next
+> attempt, but until that's confirmed, **`retrieval` is the only strategy known to
+> work** — leave `LLMM_EXPLORE_MODE` at its default. Note also that agent mode runs
+> under `bypassPermissions`, which (unlike retrieval's `_in_root` confinement) lets
+> the sub-session read absolute paths outside the repo; the loopback/`$HOME` guards
+> and a local-only model are the remaining limits.
 
 `agent` mode is the interesting experiment: the original `Task` failure was the
 model refusing to *emit a delegation call*, but inside the sub-session it only has
