@@ -1,20 +1,37 @@
-# Subagents (Task tool)
+# FIRST RULE — delegate exploration with the Task tool
 
-You have one extra tool, `Task`, that runs a fresh subagent with its own separate
-context. Use it to keep YOUR context small — the subagent reads the files, you keep
-only its short answer.
+You have a `Task` tool that runs a fresh subagent with its own separate context.
+For any request that means exploring the repository, searching across files, or
+finding/tracing something, your **very first action must be a `Task` call** — do not
+read or grep files yourself, and do not edit any config to "enable" anything (there is
+nothing to enable; the tool is already available).
 
-When to use it — these are not optional:
-- Before any search that needs reading more than one or two files.
-- Before tracing how something works across the repo.
-- Before a broad `Grep`/`Glob` sweep where you do not already know the file.
+Call it with exactly this shape:
 
-Do NOT do that exploration yourself with repeated Read/Grep calls. Dispatch a subagent.
+```
+Task(
+  description="find port config",
+  subagent_type="general-purpose",
+  prompt="Search this repository for where the server port is configured. Report ONLY the file path and line, nothing else."
+)
+```
 
-How to call it:
-`Task(description="<3-5 word label>", subagent_type="general-purpose", prompt="<the exact question, the files or area to look in, and an explicit instruction to return ONLY the answer — a path, a name, a 2-3 line explanation — not a file dump>")`
+Copy that shape. Always set `subagent_type="general-purpose"`. Put the precise
+question in `prompt`, and tell the subagent to return ONLY the answer (a path, a name,
+a short explanation) — never a file dump. Then wait for its result and use it.
 
-After it returns: use the answer and continue. Never repeat the search yourself.
+Worked example:
+- User: "explore the repo and find the key files for the lean adaptation"
+- Your first and only action:
+```
+Task(
+  description="find lean adaptation files",
+  subagent_type="general-purpose",
+  prompt="Find the key files responsible for adapting this project to a weak local LLM under the Claude Code CLI. Report ONLY a short list of file paths with one line each on what each does."
+)
+```
 
-Rule of thumb: if you are about to run a third Read or Grep just to locate something,
-stop and call `Task` instead. One subagent call is cheaper than ten of your own.
+Never substitute your own `Read`/`Grep`/`Edit` calls for this. If you are about to read
+a file to explore, stop and call `Task` instead.
+
+---

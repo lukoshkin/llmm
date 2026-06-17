@@ -44,10 +44,13 @@ assert_not_contains "$out_ns" "ARG --mcp-config" "LLMM_SCRATCHPAD=0 drops --mcp-
 typeset out_sa
 out_sa="$(LLMM_SUBAGENTS=1 LLMM_DRYRUN=1 claude::launch a 11111 1 65536 2>&1)"
 assert_contains "$out_sa" "ARG Task" "LLMM_SUBAGENTS=1 re-admits Task"
-# Subagents on => append Task-usage guidance; off => no append (no absent-tool mention).
-assert_contains "$out_sa" "ARG --append-system-prompt" "LLMM_SUBAGENTS=1 appends Task guidance"
-assert_contains "$out_sa" "Task tool" "appended guidance mentions the Task tool"
-assert_not_contains "$out" "ARG --append-system-prompt" "default lean omits Task guidance"
+# Subagents on => Task addendum is prepended via inline --system-prompt (top placement),
+# carrying a literal worked Task(...) example. Off => base prompt via --system-prompt-file,
+# no Task mention at all.
+assert_contains "$out_sa" "subagent_type" "subagents-on injects the worked Task example"
+assert_contains "$out_sa" "Task tool" "subagents-on guidance names the Task tool"
+assert_not_contains "$out_sa" "ARG --system-prompt-file" "subagents-on uses inline --system-prompt (addendum on top)"
+assert_not_contains "$out" "subagent_type" "default lean omits Task guidance entirely"
 assert_not_contains "$out" "ARG Task" "lean drops Task/subagents"
 assert_not_contains "$out" "ARG WebSearch" "lean drops WebSearch"
 

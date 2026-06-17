@@ -145,12 +145,16 @@ claude::launch() {
     local -a leantools=("${CLAUDE_LEAN_TOOLS[@]}")
     [[ "${LLMM_SUBAGENTS:-0}" == 1 ]] && leantools+=(Task)
     cargs+=(--tools "${leantools[@]}")
-    # --system-prompt-file is a flag, so it terminates the variadic --tools list.
-    cargs+=(--system-prompt-file "$prompt")
-    # Only when subagents are on: append Task-usage guidance. Kept OUT of the base
-    # prompt so it never names an absent tool (which confuses a weak model when off).
-    [[ "${LLMM_SUBAGENTS:-0}" == 1 ]] && \
-      cargs+=(--append-system-prompt "$(<"$(claude::subagent_addendum)")")
+    # System prompt. With subagents off: the base lean prompt via --system-prompt-file
+    # (it must never name an absent tool). With subagents on: prepend the Task-usage
+    # addendum so the delegation rule sits at the TOP of the prompt (max salience for a
+    # weak model), passed inline via --system-prompt (a flag, so it still terminates the
+    # variadic --tools list above).
+    if [[ "${LLMM_SUBAGENTS:-0}" == 1 ]]; then
+      cargs+=(--system-prompt "$(<"$(claude::subagent_addendum)")"$'\n\n'"$(<"$prompt")")
+    else
+      cargs+=(--system-prompt-file "$prompt")
+    fi
   fi
   if [[ -n "${LLMM_DRYRUN:-}" ]]; then
     local x
