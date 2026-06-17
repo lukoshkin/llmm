@@ -94,3 +94,23 @@ typeset _mj; _mj="$(cat "$_mf")"
 assert_contains "$_mj" "scratchpad_server.py" "mcp json points at server"
 assert_contains "$_mj" "--with" "mcp json uses uv run --with mcp"
 assert_contains "$_mj" "--session-id" "mcp json passes session id"
+
+# --- reap_stale removes dead-PID configs, keeps live-PID configs + the scratchpad .md ---
+# (launch exec()s claude, so the EXIT trap never fires; reap_stale is the real cleanup.)
+typeset _rd; _rd="$(mktemp -d)/.llmm"; mkdir -p "$_rd"
+print x > "$_rd/hooks.20200101_000000_999999999.json"   # dead/impossible pid
+print x > "$_rd/mcp.20200101_000000_999999999.json"
+print x > "$_rd/hooks.20200101_000000_$$.json"           # this shell's live pid
+print x > "$_rd/sess.md"
+claude::reap_stale "$_rd"
+assert_eq "$([[ -f "$_rd/hooks.20200101_000000_999999999.json" ]] && print y || print n)" n "reap removes dead-pid hooks"
+assert_eq "$([[ -f "$_rd/mcp.20200101_000000_999999999.json" ]] && print y || print n)" n "reap removes dead-pid mcp"
+assert_eq "$([[ -f "$_rd/hooks.20200101_000000_$$.json" ]] && print y || print n)" y "reap keeps live-pid hooks"
+assert_eq "$([[ -f "$_rd/sess.md" ]] && print y || print n)" y "reap keeps scratchpad md"
+
+# --- writers refuse to follow a pre-planted symlink (symlink-clobber guard) ---
+typeset _lt; _lt="$(mktemp)"
+ln -s "$_lt" "$_rd/hooks.evil.json"
+assert_rc 1 "$( (claude::write_hooks_json "$_rd" evil 65536 85) >/dev/null 2>&1; print $? )" "write_hooks_json refuses symlink target"
+assert_eq "$(cat "$_lt")" "" "symlink target left untouched"
+rm -f "$_lt" "$_rd/hooks.evil.json"

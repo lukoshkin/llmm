@@ -33,6 +33,7 @@ claude::session_id() { print -r -- "$(date +%Y%m%d_%H%M%S)_$$"; }
 claude::write_hooks_json() {
   local dir="$1" id="$2" ctx="$3" pct="$4"
   local hd="$LLMM_ROOT/lib/hooks" f="$1/hooks.$2.json"
+  [[ -L "$f" ]] && ui::die "refusing to write through symlink: $f"
   cat > "$f" <<JSON
 {
   "hooks": {
@@ -48,6 +49,7 @@ JSON
 claude::write_mcp_json() {
   local dir="$1" id="$2"
   local hd="$LLMM_ROOT/lib/hooks" f="$1/mcp.$2.json"
+  [[ -L "$f" ]] && ui::die "refusing to write through symlink: $f"
   cat > "$f" <<JSON
 {
   "mcpServers": {
@@ -59,6 +61,19 @@ claude::write_mcp_json() {
 }
 JSON
   print -r -- "$f"
+}
+
+# claude::reap_stale <scratchpad_dir> -> remove ephemeral hooks/mcp config files whose
+# owning llmm process (the PID is the session id's last field) is no longer running.
+# Needed because launch exec()s claude, so the EXIT trap that would delete this session's
+# files never fires; reaping dead-PID files at the next launch keeps .llmm from growing.
+# A live concurrent session keeps its own files; the persistent scratchpad .md is untouched.
+claude::reap_stale() {
+  local dir="$1" f pid
+  for f in "$dir"/hooks.*.json(N) "$dir"/mcp.*.json(N); do
+    pid="${${f:t:r}##*_}"
+    [[ "$pid" == <-> ]] && ! kill -0 "$pid" 2>/dev/null && rm -f "$f"
+  done
 }
 
 # claude::launch <alias> <port> <lean> <ctx> [claude args...]
@@ -103,11 +118,11 @@ claude::launch() {
       mcp="$scratch/mcp.$sid.json"
       if [[ -z "${LLMM_DRYRUN:-}" ]]; then
         mkdir -p "$scratch"
+        claude::reap_stale "$scratch"   # exec() below kills any EXIT trap; reap here instead
         claude::write_hooks_json "$scratch" "$sid" "$ctx" "$pct" >/dev/null
         claude::write_mcp_json "$scratch" "$sid" >/dev/null
         grep -qxF '.llmm/' .gitignore 2>/dev/null || \
           { [[ -d .git || -f .gitignore ]] && print -- '.llmm/' >> .gitignore; }
-        trap "rm -f ${(q)hooks} ${(q)mcp}" EXIT
       fi
       cargs+=(--settings "$hooks" --mcp-config "$mcp")
     fi
