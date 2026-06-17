@@ -26,9 +26,15 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-say()  { printf '==> %s\n' "$*"; }
-warn() { printf 'warn: %s\n' "$*" >&2; }
-die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
+# Install/update uses a cyan ==> to set this op-group apart from llmm's runtime
+# output (green ==>, see lib/ui.zsh). Severity prefixes keep the usual yellow/red.
+# Color only on a TTY and when NO_COLOR is unset; stdout (say) and stderr
+# (warn/die) are gated independently so redirecting one still colors the other.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then C_CYN=$'\033[36m'; C_O_RST=$'\033[0m'; else C_CYN=''; C_O_RST=''; fi
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then C_YEL=$'\033[33m'; C_RED=$'\033[31m'; C_E_RST=$'\033[0m'; else C_YEL=''; C_RED=''; C_E_RST=''; fi
+say()  { printf '%s==>%s %s\n' "$C_CYN" "$C_O_RST" "$*"; }
+warn() { printf '%swarn:%s %s\n' "$C_YEL" "$C_E_RST" "$*" >&2; }
+die()  { printf '%serror:%s %s\n' "$C_RED" "$C_E_RST" "$*" >&2; exit 1; }
 has()  { command -v "$1" >/dev/null 2>&1; }
 
 # Self-bootstrap: if not running from within LLMM_SRC, ensure the repo is
