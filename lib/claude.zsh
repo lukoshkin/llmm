@@ -202,6 +202,8 @@ claude::launch() {
         local hooks="$scratch/hooks.$sid.json"
         [[ -z "${LLMM_DRYRUN:-}" ]] && claude::write_hooks_json "$scratch" "$sid" "$ctx" "$pct" >/dev/null
         cargs+=(--settings "$hooks")
+        cargs+=(--plugin-dir "$LLMM_ROOT/lib/claude-commands")
+        cenv+=(LLMM_SCRATCHPAD_FILE="$scratch/$sid.md")
       fi
     fi
     # Tool list: lean core, plus Task when subagents are opted in.

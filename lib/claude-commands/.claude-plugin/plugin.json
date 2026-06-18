@@ -1,0 +1,12 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "scratchpad",
+  "version": "0.1.0",
+  "description": "Slash commands available in llmm sessions",
+  "author": {
+    "name": "lukoshkin"
+  },
+  "skills": [
+    "./"
+  ]
+}

@@ -44,6 +44,10 @@ assert_contains "$out" ".llmm/mcp." "lean mcp path points at .llmm"
 assert_contains "$out" "ARG --allowedTools" "lean allow-lists the llmm MCP tools"
 assert_contains "$out" "ARG mcp__scratchpad" "lean auto-approves the scratchpad server"
 assert_contains "$out" "ARG mcp__explore" "lean auto-approves the explore server"
+assert_contains "$out" "ENV LLMM_SCRATCHPAD_FILE=" "lean sets LLMM_SCRATCHPAD_FILE"
+assert_contains "$out" ".llmm/" "LLMM_SCRATCHPAD_FILE points into .llmm"
+assert_contains "$out" "ARG --plugin-dir" "lean wires --plugin-dir for scratchpad skill"
+assert_contains "$out" "claude-commands" "--plugin-dir points at the claude-commands plugin"
 
 # Disabling the scratchpad drops the hooks (--settings) but explore (default-on) still
 # wires --mcp-config. Both wires drop only when explore is also off (subagents on).
@@ -53,6 +57,8 @@ assert_not_contains "$out_ns" "ARG --settings" "LLMM_SCRATCHPAD=0 drops --settin
 assert_contains "$out_ns" "ARG --mcp-config" "LLMM_SCRATCHPAD=0 keeps --mcp-config (explore)"
 assert_contains "$out_ns" "ARG mcp__explore" "LLMM_SCRATCHPAD=0 still auto-approves explore"
 assert_not_contains "$out_ns" "ARG mcp__scratchpad" "LLMM_SCRATCHPAD=0 does not allow-list scratchpad"
+assert_not_contains "$out_ns" "ENV LLMM_SCRATCHPAD_FILE=" "LLMM_SCRATCHPAD=0 does not set LLMM_SCRATCHPAD_FILE"
+assert_not_contains "$out_ns" "ARG --plugin-dir" "LLMM_SCRATCHPAD=0 does not wire --plugin-dir"
 typeset out_none
 out_none="$(LLMM_SCRATCHPAD=0 LLMM_SUBAGENTS=1 LLMM_DRYRUN=1 claude::launch a 11111 1 65536 2>&1)"
 assert_not_contains "$out_none" "ARG --settings" "scratchpad+explore both off drops --settings"
