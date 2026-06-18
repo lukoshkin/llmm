@@ -50,7 +50,7 @@ CLAUDE_BIN = args.claude_bin or shutil.which("claude") or ""
 MAX_FILES = 8
 MAX_FILE_CHARS = 4000
 BUDGET = 14000
-ANSWER_CAP = 1600
+ANSWER_CAP = 4000
 TIMEOUT = 120
 # The parent's MCP tool-call timeout is observed to be 120s (MCP_TOOL_TIMEOUT did not
 # raise it in this CLI build). The whole explore() call must finish under it, INCLUDING a
@@ -174,8 +174,9 @@ def _gather(question: str, paths: list[str]) -> str:
 def _ask(question: str, context: str, timeout: int = TIMEOUT) -> str:
     system = (
         "You are a code-exploration assistant. Answer the question using ONLY the "
-        "repository context provided. Be concise: 3-5 lines max, cite file paths. If "
-        "the context does not contain the answer, say so plainly."
+        "repository context provided, citing file paths. Default to a few lines; when the "
+        "question asks for a code excerpt or a broad summary, give it in full — up to "
+        "roughly a page. If the context does not contain the answer, say so plainly."
     )
     user = f"Question: {question}\n\nRepository context:\n{context or '(no matching files found)'}"
     payload = {
@@ -184,7 +185,7 @@ def _ask(question: str, context: str, timeout: int = TIMEOUT) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "max_tokens": 400,
+        "max_tokens": 1000,
         "temperature": 0.2,
         "stream": False,
     }
@@ -218,7 +219,9 @@ _AGENT_SYSTEM = (
     "locate the relevant files, then Read the few that matter. Use paths relative to the "
     "current directory (e.g. `lib/server.zsh`); to list or search a directory, use Glob or "
     "Grep, not Read. Work efficiently — about 8 tool calls at most — then stop and reply "
-    "with only the final answer: 3-5 lines citing the file paths."
+    "with only the final answer, citing the file paths. Default to a few lines; when the "
+    "question asks for a code excerpt or a broad summary, give it in full — up to roughly "
+    "a page."
 )
 
 _AGENT_SETTINGS_PATH = ""
@@ -297,11 +300,12 @@ def _agent(question: str, paths: list[str]) -> str:
         return _retrieval(question, paths)
     fb = AGENT_FALLBACK_ASK_TIMEOUT  # tightened so agent + fallback stays under 120s
     prompt = question
+    prompt += f"\n\nYour working directory is the project root: {ROOT}"
     listing = _repo_files()
     if listing:
         prompt += (
-            "\n\nFiles in this repository (paths relative to the current directory). Read "
-            "only from this list, using each path exactly as shown:\n" + listing
+            "\n\nThese are the repository's files (relative to that root). Read only from "
+            "this list, using each path exactly as shown:\n" + listing
         )
     if paths:
         prompt += "\n\nStart from: " + ", ".join(paths)
@@ -370,7 +374,8 @@ def explore(question: str, paths: list[str] | None = None) -> str:
     """Offload a codebase question to a fresh, isolated reasoning pass so the bulky file
     contents never enter your context. Pass `paths` (files or globs) when you know roughly
     where to look — it sharply improves the answer; otherwise the repo is grepped for terms
-    from your question. Returns a short (3-5 line) answer. Use this INSTEAD of reading many
+    from your question. Returns a concise answer by default — ask for a code snippet or a
+    fuller summary in your question when you need one. Use this INSTEAD of reading many
     files yourself when exploring or searching the codebase."""
     paths = paths or []
     return _agent(question, paths) if MODE == "agent" else _retrieval(question, paths)

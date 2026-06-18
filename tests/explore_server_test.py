@@ -144,10 +144,8 @@ check(
 check("bypassPermissions" not in cmd, "agent cmd does not bypass permissions")
 check(captured["cwd"] == es.ROOT, "agent runs in the repo root")
 _prompt = cmd[cmd.index("-p") + 1]
-check(
-    "Files in this repository" in _prompt,
-    "agent prompt is seeded with the real file list",
-)
+check("repository's files" in _prompt, "agent prompt is seeded with the real file list")
+check(es.ROOT in _prompt, "agent prompt states the project root")
 # a settings file confines reads to ROOT (allow Read under ROOT + Grep/Glob)
 sp = cmd[cmd.index("--settings") + 1]
 _rules = json.load(open(sp))["permissions"]["allow"]
