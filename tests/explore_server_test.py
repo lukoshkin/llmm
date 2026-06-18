@@ -104,12 +104,10 @@ es.urllib.request.urlopen = lambda *a, **k: (_ for _ in ()).throw(
 out = es.explore("anything", ["config.default.zsh"])
 check(out.startswith("explore unavailable"), "URLError yields a fallback message")
 
-# _repo_dirs maps real directories as absolute paths (this test runs inside the git repo)
-_dirs = es._repo_dirs()
-check(f"{es.ROOT}/lib/" in _dirs, "dir map includes a real top dir (absolute)")
-check(f"{es.ROOT}/lib/hooks/" in _dirs, "dir map includes a real nested dir (every ancestor)")
-check("config.default.zsh" not in _dirs, "dir map omits files (directories only)")
-check("/home/user/" not in _dirs, "dir map has no hallucinated absolute paths")
+# _repo_files lists real tracked files (this test runs inside the git repo)
+_files = es._repo_files()
+check("config.default.zsh" in _files, "repo listing includes real files")
+check("/home/user/" not in _files, "repo listing has no hallucinated absolute paths")
 
 # _is_loopback gates the nested spawn to a local server
 check(es._is_loopback("http://127.0.0.1:11111"), "127.0.0.1 is loopback")
@@ -146,7 +144,7 @@ check(
 check("bypassPermissions" not in cmd, "agent cmd does not bypass permissions")
 check(captured["cwd"] == es.ROOT, "agent runs in the repo root")
 _prompt = cmd[cmd.index("-p") + 1]
-check("repository's directories" in _prompt, "agent prompt is seeded with the real dir map")
+check("repository's files" in _prompt, "agent prompt is seeded with the real file list")
 check(es.ROOT in _prompt, "agent prompt states the project root")
 # a settings file confines reads to ROOT (allow Read under ROOT + Grep/Glob)
 sp = cmd[cmd.index("--settings") + 1]
