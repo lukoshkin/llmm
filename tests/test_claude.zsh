@@ -40,6 +40,10 @@ assert_contains "$out" "ARG --settings" "lean wires scratchpad --settings"
 assert_contains "$out" "ARG --mcp-config" "lean wires scratchpad --mcp-config"
 assert_contains "$out" ".llmm/hooks." "lean settings path points at .llmm"
 assert_contains "$out" ".llmm/mcp." "lean mcp path points at .llmm"
+# Both llmm MCP servers are auto-approved so they never prompt; built-ins are untouched.
+assert_contains "$out" "ARG --allowedTools" "lean allow-lists the llmm MCP tools"
+assert_contains "$out" "ARG mcp__scratchpad" "lean auto-approves the scratchpad server"
+assert_contains "$out" "ARG mcp__explore" "lean auto-approves the explore server"
 
 # Disabling the scratchpad drops the hooks (--settings) but explore (default-on) still
 # wires --mcp-config. Both wires drop only when explore is also off (subagents on).
@@ -47,10 +51,13 @@ typeset out_ns
 out_ns="$(LLMM_SCRATCHPAD=0 LLMM_DRYRUN=1 claude::launch a 11111 1 65536 2>&1)"
 assert_not_contains "$out_ns" "ARG --settings" "LLMM_SCRATCHPAD=0 drops --settings"
 assert_contains "$out_ns" "ARG --mcp-config" "LLMM_SCRATCHPAD=0 keeps --mcp-config (explore)"
+assert_contains "$out_ns" "ARG mcp__explore" "LLMM_SCRATCHPAD=0 still auto-approves explore"
+assert_not_contains "$out_ns" "ARG mcp__scratchpad" "LLMM_SCRATCHPAD=0 does not allow-list scratchpad"
 typeset out_none
 out_none="$(LLMM_SCRATCHPAD=0 LLMM_SUBAGENTS=1 LLMM_DRYRUN=1 claude::launch a 11111 1 65536 2>&1)"
 assert_not_contains "$out_none" "ARG --settings" "scratchpad+explore both off drops --settings"
 assert_not_contains "$out_none" "ARG --mcp-config" "scratchpad+explore both off drops --mcp-config"
+assert_not_contains "$out_none" "ARG --allowedTools" "both off drops the MCP allow-list"
 
 # Subagents opt-in (LLMM_SUBAGENTS=1) swaps explore for Task: adds Task to --tools,
 # prepends the Task addendum (worked example) inline, and drops the explore guidance.
@@ -61,6 +68,8 @@ assert_contains "$out_sa" "subagent_type" "subagents-on injects the worked Task 
 assert_contains "$out_sa" "Task tool" "subagents-on guidance names the Task tool"
 assert_not_contains "$out_sa" "ARG --system-prompt-file" "subagents-on uses inline --system-prompt (addendum on top)"
 assert_not_contains "$out_sa" "explore(" "subagents-on drops the explore guidance"
+assert_contains "$out_sa" "ARG mcp__scratchpad" "subagents-on still auto-approves scratchpad"
+assert_not_contains "$out_sa" "ARG mcp__explore" "subagents-on does not allow-list explore (it's off)"
 assert_not_contains "$out" "subagent_type" "default lean omits Task guidance entirely"
 assert_not_contains "$out" "ARG Task" "default lean drops Task/subagents"
 assert_not_contains "$out" "ARG WebSearch" "lean drops WebSearch"

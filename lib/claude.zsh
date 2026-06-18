@@ -190,6 +190,14 @@ claude::launch() {
           { [[ -d .git || -f .gitignore ]] && print -- '.llmm/' >> .gitignore; }
       fi
       cargs+=(--mcp-config "$mcp")
+      # Auto-approve only the llmm-owned MCP tools so they never prompt: whole-server
+      # rules (mcp__<server>) cover every tool the server exposes (checkpoint/recall,
+      # explore). This is a permission allow-list, not a tool restriction — built-in
+      # tools (Bash/Edit/Write) keep their normal prompting. Survives --bare (explicit flag).
+      local -a mcpallow
+      (( want_scratch )) && mcpallow+=(mcp__scratchpad)
+      (( want_explore )) && mcpallow+=(mcp__explore)
+      cargs+=(--allowedTools "${mcpallow[@]}")
       if (( want_scratch )); then
         local hooks="$scratch/hooks.$sid.json"
         [[ -z "${LLMM_DRYRUN:-}" ]] && claude::write_hooks_json "$scratch" "$sid" "$ctx" "$pct" >/dev/null

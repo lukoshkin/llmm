@@ -153,6 +153,11 @@ exclusively:
 (`explore` is independent of the scratchpad: `LLMM_SCRATCHPAD=0` turns off the
 checkpoint hooks but leaves `explore` wired when subagents are off.)
 
+Whichever of these servers is wired is **auto-approved** so it never interrupts with a
+permission prompt — `claude::launch` passes `--allowedTools mcp__scratchpad mcp__explore`
+(only the wired ones). This is a permission allow-list, not a tool restriction: the
+built-in tools (`Bash`/`Edit`/`Write`) keep their normal prompting.
+
 ## Known limitations
 
 - **Auto-compact window floor (~100K).** Claude Code v2.1.x floors the auto-compact
