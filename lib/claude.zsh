@@ -126,6 +126,16 @@ claude::launch() {
     ANTHROPIC_DEFAULT_HAIKU_MODEL="$alias"
     ANTHROPIC_DEFAULT_OPUS_MODEL="$alias"
     CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
+    # ANTHROPIC_BASE_URL only redirects inference; telemetry/error-reporting/feedback hit
+    # their own hardcoded endpoints and would still ship usage/prompt-adjacent data off a
+    # session meant to be fully local. Disable those three. NOT the autoupdater: that is a
+    # benign version check, a current CLI is worth keeping, and this env is scoped to the
+    # llmm-launched claude only — suppressing it would freeze the CLI for anyone who runs
+    # Claude exclusively through llmm. (The umbrella CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+    # would also kill DISABLE_AUTOUPDATER, so we set the three individually instead.)
+    DISABLE_TELEMETRY=1
+    DISABLE_ERROR_REPORTING=1
+    DISABLE_FEEDBACK_COMMAND=1
   )
   # Pin the model on the CLI in both modes: --model outranks the user's
   # ~/.claude/settings.json `model` key (which --bare does NOT suppress), so a global

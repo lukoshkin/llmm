@@ -13,6 +13,9 @@ out="$(LLMM_DRYRUN=1 claude::launch myalias 11111 1 65536 2>&1)"
 assert_contains "$out" "ENV ANTHROPIC_BASE_URL=http://127.0.0.1:11111" "lean sets base url"
 assert_contains "$out" "ENV ANTHROPIC_DEFAULT_SONNET_MODEL=myalias" "lean sets alias env"
 assert_contains "$out" "ENV CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1" "lean keeps beta disable"
+assert_contains "$out" "ENV DISABLE_TELEMETRY=1" "lean disables off-base-url telemetry"
+assert_contains "$out" "ENV DISABLE_ERROR_REPORTING=1" "lean disables off-base-url error reporting"
+assert_not_contains "$out" "ENV DISABLE_AUTOUPDATER" "lean leaves the CLI autoupdater on"
 assert_contains "$out" "ENV CLAUDE_CODE_DISABLE_1M_CONTEXT=1" "lean disables 1M-context detection"
 assert_contains "$out" "ENV CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536" "lean sets model context size"
 assert_contains "$out" "ENV CLAUDE_CODE_AUTO_COMPACT_WINDOW=65536" "lean sets real window"
@@ -73,6 +76,7 @@ assert_not_contains "$out" "ENV CLAUDE_CODE_AUTO_COMPACT_WINDOW" "full omits win
 assert_contains "$out" "ARG --model" "full pins the model on the CLI too"
 assert_contains "$out" "ARG myalias" "full --model is the local alias"
 assert_contains "$out" "ENV ANTHROPIC_BASE_URL=http://127.0.0.1:11111" "full still sets base url"
+assert_contains "$out" "ENV DISABLE_TELEMETRY=1" "full also disables off-base-url telemetry"
 
 # --- extra claude args are forwarded in both modes ---
 out="$(LLMM_DRYRUN=1 claude::launch myalias 11111 1 65536 --resume 2>&1)"

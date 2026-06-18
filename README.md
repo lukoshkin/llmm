@@ -79,6 +79,17 @@ some server-side trims. `llmm --full` opts out; `llmm --lean` forces it.
 ~0.6K, tools ~1.2K, no MCP/memory/skills), leaving essentially the whole local
 window for actual work.
 
+**Stays local (all modes).** `ANTHROPIC_BASE_URL=127.0.0.1` only redirects *inference*
+— telemetry, error reporting, and the feedback command hit their own hardcoded
+endpoints and would otherwise still ship usage/prompt-adjacent data off a session you
+mean to keep on-box. Every `llmm` session sets `DISABLE_TELEMETRY=1`,
+`DISABLE_ERROR_REPORTING=1`, and `DISABLE_FEEDBACK_COMMAND=1` to close that gap. The CLI
+**autoupdater is deliberately left on** — it's a benign version check, a current CLI is
+worth keeping, and since this env is scoped to the llmm-launched `claude` only, disabling
+it would freeze the version for anyone who runs Claude exclusively through `llmm`. (The
+umbrella `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` also kills the autoupdater, which is
+why the three vars are set individually instead.)
+
 ## Delegated exploration
 
 Exploring a codebase ("find where X is configured", "trace how Y works") is exactly
