@@ -59,10 +59,11 @@ TIMEOUT = 120
 #   = 70 + 35 + slack  ~= 110s < 120s, guaranteed.
 AGENT_TIMEOUT = 70
 AGENT_FALLBACK_ASK_TIMEOUT = 35
-# Cap the real-file listing seeded into the agent prompt so it grounds in actual paths
-# instead of hallucinating training-data ones, without blowing the small nested window.
-REPO_FILES_MAX = 200
-REPO_FILES_BUDGET = 6000
+# Cap the real-directory map seeded into the agent prompt so it grounds in the repo's
+# actual structure (instead of hallucinating training-data paths) and Globs/Greps into
+# real dirs, without blowing the small nested window.
+REPO_DIRS_MAX = 200
+REPO_DIRS_BUDGET = 6000
 
 _STOP = {
     "the",
@@ -252,10 +253,14 @@ def _agent_settings() -> str:
     return p
 
 
-def _repo_files() -> str:
-    """A capped listing of the repo's real, relative file paths. Seeded into the agent
-    prompt so the model reads existing files instead of guessing training-data paths like
-    /home/user/github/...; `git ls-files` (tracked files only), with a glob fallback."""
+def _repo_dirs() -> str:
+    """A capped map of the repo's real directories as absolute paths (each with a trailing
+    '/'). Seeded into the agent prompt so the model Globs/Greps into directories that
+    actually exist instead of guessing training-data paths like /home/user/github/...;
+    absolute so they need no relative->absolute join and match the ROOT-scoped read
+    allow-list directly. Directories only — the files within them are discovered with the
+    read tools, not handed over wholesale (which doesn't scale and sidelines the
+    discover-then-read workflow). `git ls-files` (tracked files only), with a glob fallback."""
     try:
         res = subprocess.run(
             ["git", "-C", ROOT, "ls-files"], capture_output=True, text=True, timeout=10
@@ -270,8 +275,15 @@ def _repo_files() -> str:
             for p in hits
             if os.path.isfile(p) and ".git/" not in p and "/.llmm/" not in p
         ]
-    listing = "\n".join(sorted(files)[:REPO_FILES_MAX])
-    return listing[:REPO_FILES_BUDGET]
+    dirs: set[str] = set()
+    for f in files:
+        parts = f.split("/")[:-1]  # drop the filename, keep every ancestor dir
+        for i in range(1, len(parts) + 1):
+            dirs.add("/".join(parts[:i]))
+    listing = "\n".join(
+        os.path.join(ROOT, d) + "/" for d in sorted(dirs)[:REPO_DIRS_MAX]
+    )
+    return listing[:REPO_DIRS_BUDGET]
 
 
 def _log(msg: str) -> None:
@@ -301,11 +313,11 @@ def _agent(question: str, paths: list[str]) -> str:
     fb = AGENT_FALLBACK_ASK_TIMEOUT  # tightened so agent + fallback stays under 120s
     prompt = question
     prompt += f"\n\nYour working directory is the project root: {ROOT}"
-    listing = _repo_files()
+    listing = _repo_dirs()
     if listing:
         prompt += (
-            "\n\nThese are the repository's files (relative to that root). Read only from "
-            "this list, using each path exactly as shown:\n" + listing
+            "\n\nThese are the repository's directories (absolute paths). Use Glob or Grep "
+            "within them to find the files you need:\n" + listing
         )
     if paths:
         prompt += "\n\nStart from: " + ", ".join(paths)
