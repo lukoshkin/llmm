@@ -186,8 +186,6 @@ claude::launch() {
         mkdir -p "$scratch"
         claude::reap_stale "$scratch"   # exec() below kills any EXIT trap; reap here instead
         claude::write_mcp_json "$scratch" "$sid" "$want_scratch" "$want_explore" "$port" "$alias" "$emode" "$cbin" >/dev/null
-        grep -qxF '.llmm/' .gitignore 2>/dev/null || \
-          { [[ -d .git || -f .gitignore ]] && print -- '.llmm/' >> .gitignore; }
       fi
       cargs+=(--mcp-config "$mcp")
       # Auto-approve only the llmm-owned MCP tools so they never prompt: whole-server
