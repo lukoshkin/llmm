@@ -97,6 +97,22 @@ assert_contains "$out" "ENV DISABLE_TELEMETRY=1" "full also disables off-base-ur
 out="$(LLMM_DRYRUN=1 claude::launch myalias 11111 1 65536 --resume 2>&1)"
 assert_contains "$out" "ARG --resume" "lean forwards extra args"
 
+# --- resume with UUID reuses that UUID; --session-id is omitted (would conflict) ---
+typeset _rsid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+typeset _rout
+_rout="$(LLMM_DRYRUN=1 claude::launch myalias 11111 1 65536 --resume "$_rsid" 2>&1)"
+assert_contains "$_rout" "ARG --resume" "resume: forwards --resume"
+assert_contains "$_rout" "ARG $_rsid" "resume: forwards the session UUID"
+assert_not_contains "$_rout" "ARG --session-id" "resume: omits --session-id (would conflict)"
+assert_contains "$_rout" ".llmm/mcp.$_rsid.json" "resume: mcp config uses old UUID"
+assert_contains "$_rout" "LLMM_SCRATCHPAD_FILE=" "resume: scratchpad env set"
+assert_contains "$_rout" "$_rsid.md" "resume: scratchpad env points at old UUID"
+
+# fork-session overrides: new UUID, --session-id present
+_rout="$(LLMM_DRYRUN=1 claude::launch myalias 11111 1 65536 --resume "$_rsid" --fork-session 2>&1)"
+assert_not_contains "$_rout" "ARG --session-id $_rsid" "fork-session: does not reuse old UUID"
+assert_contains "$_rout" "ARG --session-id" "fork-session: generates a new --session-id"
+
 # --- LLMM_MCP_CONFIG opt-in re-admits --mcp-config <path> ---
 typeset _mcp="$(mktemp)"; print '{}' > "$_mcp"
 out="$(LLMM_MCP_CONFIG="$_mcp" LLMM_DRYRUN=1 claude::launch a 1 1 100 2>&1)"

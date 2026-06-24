@@ -180,7 +180,23 @@ claude::launch() {
     [[ "${LLMM_SUBAGENTS:-0}" != 1 ]] && want_explore=1
     if (( want_scratch || want_explore )); then
       local sid scratch mcp emode cbin
-      sid="$(claude::session_id)"
+      # When resuming an existing session, reuse its UUID so the scratchpad persists
+      # across relaunches. Claude rejects --session-id alongside --resume unless
+      # --fork-session is also present, so omit it and let --resume own the identity.
+      local _resume_sid="" _has_fork=0 _j
+      for (( _j = 1; _j <= $#; _j++ )); do
+        case "${@[_j]}" in
+        --fork-session) _has_fork=1 ;;
+        --resume|-r)    (( _j + 1 <= $# )) && _resume_sid="${@[_j+1]}" ;;
+        esac
+      done
+      (( _has_fork )) && _resume_sid=""
+      if [[ -n "$_resume_sid" ]]; then
+        sid="$_resume_sid"
+      else
+        sid="$(claude::session_id)"
+        cargs+=(--session-id "$sid")
+      fi
       scratch="$PWD/.llmm"
       mcp="$scratch/mcp.$sid.json"
       emode="${LLMM_EXPLORE_MODE:-retrieval}"
@@ -195,7 +211,6 @@ claude::launch() {
         print -r -- $$ > "$scratch/pid.$sid.txt"
       fi
       cargs+=(--mcp-config "$mcp")
-      cargs+=(--session-id "$sid")
       # Auto-approve only the llmm-owned MCP tools so they never prompt: whole-server
       # rules (mcp__<server>) cover every tool the server exposes (checkpoint/recall,
       # explore). This is a permission allow-list, not a tool restriction — built-in
