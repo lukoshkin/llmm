@@ -46,7 +46,8 @@ claude::compact_pct() {
 }
 
 # claude::session_id -> shell-safe unique-ish id for this launch.
-claude::session_id() { print -r -- "$(date +%Y%m%d_%H%M%S)_$$"; }
+# Returns a UUID for Claude Code's --session-id flag.
+claude::session_id() { print -r -- "$(uuidgen | tr '[:upper:]' '[:lower:]')"; }
 
 # claude::write_hooks_json <scratchpad_dir> <id> <ctx> <pct> -> prints the file path.
 claude::write_hooks_json() {
@@ -98,16 +99,20 @@ JSON
   print -r -- "$f"
 }
 
-# claude::reap_stale <scratchpad_dir> -> remove ephemeral hooks/mcp config files whose
-# owning llmm process (the PID is the session id's last field) is no longer running.
-# Needed because launch exec()s claude, so the EXIT trap that would delete this session's
-# files never fires; reaping dead-PID files at the next launch keeps .llmm from growing.
-# A live concurrent session keeps its own files; the persistent scratchpad .md is untouched.
+# claude::reap_stale <scratchpad_dir> -> remove ephemeral hooks/mcp/pid files whose
+# owning process is no longer running. Reads the PID from pid.<uuid>.txt rather than
+# parsing the filename, because UUIDs don't embed PIDs. The persistent scratchpad .md
+# is left untouched so the next session can resume it.
 claude::reap_stale() {
-  local dir="$1" f pid
-  for f in "$dir"/hooks.*.json(N) "$dir"/mcp.*.json(N); do
-    pid="${${f:t:r}##*_}"
-    [[ "$pid" == <-> ]] && ! kill -0 "$pid" 2>/dev/null && rm -f "$f"
+  local dir="$1"
+  local -a pid_files=("$dir"/pid.*.txt(N))
+  local pid_file sid pid
+  for pid_file in "${pid_files[@]}"; do
+    pid="$(<"$pid_file")"
+    [[ "$pid" == <-> ]] && kill -0 "$pid" 2>/dev/null && continue
+    sid="${${pid_file:t}#pid.}"
+    sid="${sid%.txt}"
+    rm -f "$dir/hooks.$sid.json" "$dir/mcp.$sid.json" "$dir/pid.$sid.txt"
   done
 }
 
@@ -186,8 +191,11 @@ claude::launch() {
         mkdir -p "$scratch"
         claude::reap_stale "$scratch"   # exec() below kills any EXIT trap; reap here instead
         claude::write_mcp_json "$scratch" "$sid" "$want_scratch" "$want_explore" "$port" "$alias" "$emode" "$cbin" >/dev/null
+        # Store Claude's PID for session activity detection
+        print -r -- $$ > "$scratch/pid.$sid.txt"
       fi
       cargs+=(--mcp-config "$mcp")
+      cargs+=(--session-id "$sid")
       # Auto-approve only the llmm-owned MCP tools so they never prompt: whole-server
       # rules (mcp__<server>) cover every tool the server exposes (checkpoint/recall,
       # explore). This is a permission allow-list, not a tool restriction — built-in

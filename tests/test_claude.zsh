@@ -159,15 +159,21 @@ assert_eq "$(python3 -m json.tool "$_mf" >/dev/null 2>&1 && print ok)" ok "agent
 
 # --- reap_stale removes dead-PID configs, keeps live-PID configs + the scratchpad .md ---
 # (launch exec()s claude, so the EXIT trap never fires; reap_stale is the real cleanup.)
+# PID is stored in pid.<uuid>.txt, not encoded in the filename (UUIDs contain no PIDs).
 typeset _rd; _rd="$(mktemp -d)/.llmm"; mkdir -p "$_rd"
-print x > "$_rd/hooks.20200101_000000_999999999.json"   # dead/impossible pid
-print x > "$_rd/mcp.20200101_000000_999999999.json"
-print x > "$_rd/hooks.20200101_000000_$$.json"           # this shell's live pid
+typeset _dead="a1b2c3d4-0000-0000-0000-000000000000"
+typeset _live="b2c3d4e5-0000-0000-0000-000000000001"
+print 999999999 > "$_rd/pid.$_dead.txt"              # dead/impossible pid
+print x > "$_rd/hooks.$_dead.json"
+print x > "$_rd/mcp.$_dead.json"
+print $$ > "$_rd/pid.$_live.txt"                     # this shell's live pid
+print x > "$_rd/hooks.$_live.json"
 print x > "$_rd/sess.md"
 claude::reap_stale "$_rd"
-assert_eq "$([[ -f "$_rd/hooks.20200101_000000_999999999.json" ]] && print y || print n)" n "reap removes dead-pid hooks"
-assert_eq "$([[ -f "$_rd/mcp.20200101_000000_999999999.json" ]] && print y || print n)" n "reap removes dead-pid mcp"
-assert_eq "$([[ -f "$_rd/hooks.20200101_000000_$$.json" ]] && print y || print n)" y "reap keeps live-pid hooks"
+assert_eq "$([[ -f "$_rd/pid.$_dead.txt" ]] && print y || print n)" n "reap removes dead pid file"
+assert_eq "$([[ -f "$_rd/hooks.$_dead.json" ]] && print y || print n)" n "reap removes dead-pid hooks"
+assert_eq "$([[ -f "$_rd/mcp.$_dead.json" ]] && print y || print n)" n "reap removes dead-pid mcp"
+assert_eq "$([[ -f "$_rd/hooks.$_live.json" ]] && print y || print n)" y "reap keeps live-pid hooks"
 assert_eq "$([[ -f "$_rd/sess.md" ]] && print y || print n)" y "reap keeps scratchpad md"
 
 # --- writers refuse to follow a pre-planted symlink (symlink-clobber guard) ---

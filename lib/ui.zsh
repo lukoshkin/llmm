@@ -4,7 +4,7 @@
 typeset -g UI_RED=$'\e[31m' UI_YEL=$'\e[33m' UI_GRN=$'\e[32m' UI_DIM=$'\e[2m' UI_RST=$'\e[0m'
 [[ -t 2 ]] || { UI_RED= UI_YEL= UI_GRN= UI_DIM= UI_RST= }
 
-ui::info() { print -r -- "${UI_GRN}==>${UI_RST} $*"; }
+ui::info() { print -u2 -r -- "${UI_GRN}==>${UI_RST} $*"; }
 ui::warn() { print -u2 -r -- "${UI_YEL}war: ${UI_RST}$*"; }
 ui::err()  { print -u2 -r -- "${UI_RED}error: ${UI_RST}$*"; }
 ui::die()  { ui::err "$*"; exit 1; }

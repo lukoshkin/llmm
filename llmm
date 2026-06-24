@@ -25,6 +25,7 @@ usage: llmm [command] [flags]
   logs [-f] [--tail N]    tail the server log (default --tail 100)
   config              open the config in $EDITOR
   kill                stop the running server
+  scratchpad          open a scratchpad file from a running session
   update [--local]    update llmm: pull from origin, or with --local from
                       $LLMM_DEV_SRC (your local checkout), then re-run install
   help                show this help
@@ -37,8 +38,9 @@ start-path flags:
 EOF
 }
 
-llmm::start_path() {  # <profile> <lean> [extra claude args...]
-  local profile="$1" lean="$2"; shift 2
+llmm::start_path() { # <profile> <lean> [extra claude args...]
+  local profile="$1" lean="$2"
+  shift 2
   local model="$LLMM_MODEL"
   if [[ -n "${LLMM_PICK:-}" ]]; then
     model="$(models::pick)" || exit 1
@@ -53,7 +55,8 @@ llmm::start_path() {  # <profile> <lean> [extra claude args...]
   local ctx="$(config::ctx_size "$profile")"
   if [[ -n "${SERVE_ONLY:-}" ]]; then
     server::ensure "$profile" "$model" "$alias" "$LLMM_PORT" || exit 1
-    ui::info "SERVE_ONLY set — not launching claude"; exec tail -f /dev/null
+    ui::info "SERVE_ONLY set — not launching claude"
+    exec tail -f /dev/null
   fi
   server::ensure "$profile" "$model" "$alias" "$LLMM_PORT" || exit 1
   # Adopt the actually-running server's alias so Claude's label matches what is
@@ -66,16 +69,22 @@ llmm::start_path() {  # <profile> <lean> [extra claude args...]
 
 llmm::cmd_logs() {
   local follow=0 tail_n=100
-  while (( $# )); do
+  while (($#)); do
     case "$1" in
-      -f|--follow) follow=1; shift ;;
-      --tail) tail_n="$2"; shift 2 ;;
-      *) shift ;;
+    -f | --follow)
+      follow=1
+      shift
+      ;;
+    --tail)
+      tail_n="$2"
+      shift 2
+      ;;
+    *) shift ;;
     esac
   done
   local lf="$(server::logfile "$LLMM_PORT")"
   [[ -f "$lf" ]] || ui::die "no log at $lf"
-  if (( follow )); then tail -n "$tail_n" -f "$lf"; else tail -n "$tail_n" "$lf"; fi
+  if ((follow)); then tail -n "$tail_n" -f "$lf"; else tail -n "$tail_n" "$lf"; fi
 }
 
 llmm::cmd_config() {
@@ -84,9 +93,78 @@ llmm::cmd_config() {
   exec "$ed" "$(config::file)"
 }
 
+llmm::cmd_scratchpad() {
+  local scratch_dir="$PWD/.llmm"
+  [[ -d "$scratch_dir" ]] || ui::die "no scratchpad directory found at $scratch_dir"
+
+  # Detect active sessions via pid files, not .md files —
+  # sessions that haven't called checkpoint yet have no .md file.
+  local -a pid_files=("$scratch_dir"/pid.*.txt(N))
+  [[ ${#pid_files} -eq 0 ]] && ui::die "no session pid files found in $scratch_dir"
+
+  local -a menu_items=() active_sids=()
+  local pid_file sid pid md_file preview status_section
+
+  for pid_file in "${pid_files[@]}"; do
+    pid="$(<"$pid_file")"
+    [[ "$pid" == <-> ]] && kill -0 "$pid" 2>/dev/null || continue
+
+    # pid.<uuid>.txt -> <uuid>
+    sid="${${pid_file:t}#pid.}"
+    sid="${sid%.txt}"
+
+    md_file="$scratch_dir/$sid.md"
+    preview=""
+    if [[ -f "$md_file" ]]; then
+      status_section="$(
+        awk '/^## Status$/{f=1;next} /^## /{f=0} f{print}' "$md_file" |
+          head -3 | tr '\n' ' ' | cut -c1-80
+      )"
+      [[ -n "$status_section" ]] && preview=" - ${status_section}..."
+    fi
+
+    menu_items+=("$sid.md${preview}")
+    active_sids+=("$sid")
+  done
+
+  [[ ${#active_sids} -eq 0 ]] && ui::die "no active llmm sessions found"
+
+  local ed="${EDITOR:-${VISUAL:-nvim}}"
+
+  if ((${#active_sids} == 1)); then
+    md_file="$scratch_dir/${active_sids[1]}.md"
+    [[ -f "$md_file" ]] || ui::die "session ${active_sids[1]} has no scratchpad yet (checkpoint not called)"
+    ui::info "opening scratchpad: ${active_sids[1]}.md"
+    exec "$ed" "$md_file"
+  fi
+
+  # Multiple active sessions — let the user pick.
+  menu_items+=("Cancel")
+
+  local chosen
+  chosen="$(ui::menu "Select scratchpad" "${menu_items[@]}")" || {
+    ui::info "cancelled"
+    return 0
+  }
+
+  # Map chosen label back to its session id by index (same pattern as models.zsh).
+  local i
+  for ((i = 1; i <= $#active_sids; i++)); do
+    if [[ "${menu_items[i]}" == "$chosen" ]]; then
+      md_file="$scratch_dir/${active_sids[i]}.md"
+      [[ -f "$md_file" ]] || ui::die "session ${active_sids[i]} has no scratchpad yet"
+      ui::info "opening scratchpad: ${active_sids[i]}.md"
+      exec "$ed" "$md_file"
+    fi
+  done
+
+  ui::info "cancelled"
+}
+
 # llmm::route <command> [args...] — pure routing; returns rc 2 on unknown command.
 llmm::route() {
-  local cmd="${1:-}"; [[ $# -gt 0 ]] && shift
+  local cmd="${1:-}"
+  [[ $# -gt 0 ]] && shift
   # A leading dash-flag is never a command: claude's own -c/--continue, -r/--resume,
   # -p/--print, --model, etc., and our --minimal/--lean/--full/--ctx. Route it to the
   # default start path so the loop below claims our flags and forwards the rest to
@@ -101,17 +179,19 @@ llmm::route() {
   local -a rest=()
   local -a args=("$@")
   local i=1
-  while (( i <= ${#args} )); do
+  while ((i <= ${#args})); do
     case "${args[i]}" in
-      --minimal) profile=minimal ;;
-      --lean)    lean=1 ;;
-      --full)    lean=0 ;;
-      --ctx)
-        if (( i + 1 > ${#args} )); then ui::die "--ctx requires a value"; fi
-        LLMM_CTX_OVERRIDE="${args[i+1]}"; (( i++ )) ;;
-      *)         rest+=("${args[i]}") ;;
+    --minimal) profile=minimal ;;
+    --lean) lean=1 ;;
+    --full) lean=0 ;;
+    --ctx)
+      if ((i + 1 > ${#args})); then ui::die "--ctx requires a value"; fi
+      LLMM_CTX_OVERRIDE="${args[i + 1]}"
+      ((i++))
+      ;;
+    *) rest+=("${args[i]}") ;;
     esac
-    (( i++ ))
+    ((i++))
   done
   if [[ -n "${LLMM_CTX_OVERRIDE:-}" ]]; then
     [[ "$LLMM_CTX_OVERRIDE" == <-> ]] || ui::die "--ctx requires a positive integer, got: $LLMM_CTX_OVERRIDE"
@@ -119,23 +199,29 @@ llmm::route() {
   fi
 
   case "$cmd" in
-    ''|start)      llmm::start_path "$profile" "$lean" "${rest[@]}" ;;
-    pick)          LLMM_PICK=1 llmm::start_path "$profile" "$lean" "${rest[@]}" ;;
-    pull)          models::pull "${rest[1]:-}" ;;
-    status|stat|stats) status::report ;;
-    logs)          llmm::cmd_logs "${rest[@]}" ;;
-    config)        llmm::cmd_config ;;
-    kill)          server::kill "$LLMM_PORT" ;;
-    update)
-      if (( ${rest[(I)--local]} )); then
-        [[ -n "${LLMM_DEV_SRC:-}" ]] || ui::die "update --local needs LLMM_DEV_SRC set in your config (your local llmm checkout)"
-        [[ -d "$LLMM_DEV_SRC/.git" ]] || ui::die "LLMM_DEV_SRC is not a git repo: $LLMM_DEV_SRC"
-        LLMM_DEV_SRC="$LLMM_DEV_SRC" bash "$LLMM_ROOT/install.sh" --update --local
-      else
-        bash "$LLMM_ROOT/install.sh" --update
-      fi ;;
-    help|-h|--help) llmm::usage ;;
-    *)             ui::err "unknown command: $cmd"; llmm::usage; return 2 ;;
+  '' | start) llmm::start_path "$profile" "$lean" "${rest[@]}" ;;
+  pick) LLMM_PICK=1 llmm::start_path "$profile" "$lean" "${rest[@]}" ;;
+  pull) models::pull "${rest[1]:-}" ;;
+  status | stat | stats) status::report ;;
+  logs) llmm::cmd_logs "${rest[@]}" ;;
+  config) llmm::cmd_config ;;
+  kill) server::kill "$LLMM_PORT" ;;
+  scratchpad) llmm::cmd_scratchpad ;;
+  update)
+    if ((${rest[(I)--local]})); then
+      [[ -n "${LLMM_DEV_SRC:-}" ]] || ui::die "update --local needs LLMM_DEV_SRC set in your config (your local llmm checkout)"
+      [[ -d "$LLMM_DEV_SRC/.git" ]] || ui::die "LLMM_DEV_SRC is not a git repo: $LLMM_DEV_SRC"
+      LLMM_DEV_SRC="$LLMM_DEV_SRC" bash "$LLMM_ROOT/install.sh" --update --local
+    else
+      bash "$LLMM_ROOT/install.sh" --update
+    fi
+    ;;
+  help | -h | --help) llmm::usage ;;
+  *)
+    ui::err "unknown command: $cmd"
+    llmm::usage
+    return 2
+    ;;
   esac
 }
 

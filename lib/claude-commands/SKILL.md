@@ -5,3 +5,11 @@ disable-model-invocation: true
 ---
 
 !${EDITOR:-open} "$LLMM_SCRATCHPAD_FILE"
+
+---
+name: llmm scratchpad
+description: Use when the user types /llmm scratchpad. Opens a menu to select and open a scratchpad file from a running session.
+disable-model-invocation: true
+---
+
+!${EDITOR:-open} "$LLMM_SCRATCHPAD_FILE"
