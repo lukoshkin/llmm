@@ -148,6 +148,7 @@ claude::launch() {
   # llmm session targets the local server (which ignores the model name); this just
   # makes the session self-describe as the local alias, not the inherited default.
   cargs+=(--model "$alias")
+  cargs+=(--name "$(basename "$PWD")")
   if [[ "$lean" == 1 ]]; then
     # Validate before building so bad config fails loudly and early.
     local prompt pct
