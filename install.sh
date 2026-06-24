@@ -3,8 +3,9 @@
 # the llmm command. Bash 3.2-safe (macOS system bash). Idempotent.
 # Self-managing: clones/updates its own source repo at LLMM_SRC.
 #
-# Usage: install.sh [--force] [--rebuild] [--update [--local]] [--backend cuda|vulkan|cpu]
-#   --local: with --update, fast-forward LLMM_SRC from $LLMM_DEV_SRC instead of origin.
+# Usage: install.sh [--force] [--rebuild] [--update [--local [--force]]] [--backend cuda|vulkan|cpu]
+#   --local: with --update, rsync the working tree from $LLMM_DEV_SRC (uncommitted changes included).
+#   --force: with --update --local, also delete files in LLMM_SRC absent from $LLMM_DEV_SRC.
 set -euo pipefail
 
 LLMM_REPO_URL="${LLMM_REPO_URL:-https://github.com/lukoshkin/llmm.git}"
@@ -99,10 +100,13 @@ if $UPDATE; then
   if $LOCAL; then
     [ -n "${LLMM_DEV_SRC:-}" ] || die "--local requires LLMM_DEV_SRC (your local llmm checkout); set it in config.zsh"
     [ -d "$LLMM_DEV_SRC/.git" ] || die "LLMM_DEV_SRC is not a git repo: $LLMM_DEV_SRC"
-    _br="$(git -C "$LLMM_SRC" rev-parse --abbrev-ref HEAD)"
-    say "updating llmm source from local $LLMM_DEV_SRC ($_br)"
-    git -C "$LLMM_SRC" pull --ff-only "$LLMM_DEV_SRC" "$_br" ||
-      die "local ff-only pull failed — $LLMM_SRC may have diverged from $LLMM_DEV_SRC"
+    has rsync || die "rsync is required for --local update"
+    local _rsync_flags="-a --exclude='.git'"
+    $FORCE && _rsync_flags="$_rsync_flags --delete"
+    say "syncing llmm source from local $LLMM_DEV_SRC"
+    # Trailing slash on src is intentional: sync contents, not the directory itself.
+    rsync $_rsync_flags "$LLMM_DEV_SRC/" "$LLMM_SRC/" ||
+      die "rsync from $LLMM_DEV_SRC failed"
   else
     say "updating llmm source"
     git -C "$LLMM_SRC" pull --ff-only || warn "git pull failed; continuing with current checkout"

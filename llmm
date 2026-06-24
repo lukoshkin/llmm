@@ -26,8 +26,11 @@ usage: llmm [command] [flags]
   config              open the config in $EDITOR
   kill                stop the running server
   scratchpad          open a scratchpad file from a running session
-  update [--local]    update llmm: pull from origin, or with --local from
-                      $LLMM_DEV_SRC (your local checkout), then re-run install
+  update [--local [-f|--force]]
+                      update llmm: pull from origin, or with --local rsync
+                      the working tree from $LLMM_DEV_SRC (uncommitted changes
+                      included). -f/--force: also remove files absent from
+                      $LLMM_DEV_SRC
   help                show this help
 
 start-path flags:
@@ -211,7 +214,9 @@ llmm::route() {
     if ((${rest[(I)--local]})); then
       [[ -n "${LLMM_DEV_SRC:-}" ]] || ui::die "update --local needs LLMM_DEV_SRC set in your config (your local llmm checkout)"
       [[ -d "$LLMM_DEV_SRC/.git" ]] || ui::die "LLMM_DEV_SRC is not a git repo: $LLMM_DEV_SRC"
-      LLMM_DEV_SRC="$LLMM_DEV_SRC" bash "$LLMM_ROOT/install.sh" --update --local
+      local -a install_flags=(--update --local)
+      ((${rest[(I)-f]} || ${rest[(I)--force]})) && install_flags+=(--force)
+      LLMM_DEV_SRC="$LLMM_DEV_SRC" bash "$LLMM_ROOT/install.sh" "${install_flags[@]}"
     else
       bash "$LLMM_ROOT/install.sh" --update
     fi
