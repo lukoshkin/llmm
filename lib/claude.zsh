@@ -185,16 +185,27 @@ claude::launch() {
       # When resuming an existing session, reuse its UUID so the scratchpad persists
       # across relaunches. Claude rejects --session-id alongside --resume unless
       # --fork-session is also present, so omit it and let --resume own the identity.
-      local _resume_sid="" _has_fork=0 _j
+      local _resume_sid="" _has_fork=0 _skip_sid=0 _j
       for (( _j = 1; _j <= $#; _j++ )); do
         case "${@[_j]}" in
         --fork-session) _has_fork=1 ;;
         --resume|-r)    (( _j + 1 <= $# )) && _resume_sid="${@[_j+1]}" ;;
+        --continue|-c)  _skip_sid=1 ;;
         esac
       done
-      (( _has_fork )) && _resume_sid=""
+      (( _has_fork )) && _resume_sid="" && _skip_sid=0
       if [[ -n "$_resume_sid" ]]; then
         sid="$_resume_sid"
+      elif (( _skip_sid )); then
+        # --continue/-c: find the most recent scratchpad UUID so it persists.
+        # Don't pass --session-id; --continue owns the session identity.
+        local _recent_md
+        _recent_md="$(ls -t "$PWD/.llmm"/*.md 2>/dev/null | head -1)"
+        if [[ -n "$_recent_md" ]]; then
+          sid="${${_recent_md:t}%.md}"
+        else
+          sid="$(claude::session_id)"
+        fi
       else
         sid="$(claude::session_id)"
         cargs+=(--session-id "$sid")
