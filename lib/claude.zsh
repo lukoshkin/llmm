@@ -149,7 +149,11 @@ claude::launch() {
   # llmm session targets the local server (which ignores the model name); this just
   # makes the session self-describe as the local alias, not the inherited default.
   cargs+=(--model "$alias")
-  cargs+=(--name "$(basename "$PWD")")
+  # Skip --name when continuing: --continue/-c can grab any recent session
+  # (including non-llmm ones) and would permanently rename it.
+  local _is_continue=0
+  for _a in "$@"; do [[ "$_a" == --continue || "$_a" == -c ]] && _is_continue=1 && break; done
+  (( _is_continue )) || cargs+=(--name "$(basename "$PWD")")
   if [[ "$lean" == 1 ]]; then
     # Validate before building so bad config fails loudly and early.
     local prompt pct
