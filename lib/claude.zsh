@@ -151,9 +151,10 @@ claude::launch() {
   cargs+=(--model "$alias")
   # Skip --name when continuing: --continue/-c can grab any recent session
   # (including non-llmm ones) and would permanently rename it.
+  # HH:MM:SS suffix distinguishes concurrent sessions from the same folder.
   local _is_continue=0
   for _a in "$@"; do [[ "$_a" == --continue || "$_a" == -c ]] && _is_continue=1 && break; done
-  (( _is_continue )) || cargs+=(--name "$(basename "$PWD")")
+  (( _is_continue )) || cargs+=(--name "$(basename "$PWD")-$(date +%H:%M:%S)")
   if [[ "$lean" == 1 ]]; then
     # Validate before building so bad config fails loudly and early.
     local prompt pct
