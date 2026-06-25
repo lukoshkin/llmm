@@ -48,7 +48,9 @@ MODE = args.mode
 CLAUDE_BIN = args.claude_bin or shutil.which("claude") or ""
 
 MAX_FILES = 8
-MAX_FILE_CHARS = 4000
+MAX_FILE_CHARS = 6000  # raised: grep-with-context output can be longer than raw head
+CONTEXT_LINES = 20  # lines of surrounding context per grep hit in _read_relevant
+GREP_MAX_MATCHES = 3  # max hits per file when doing in-file grep
 BUDGET = 14000
 ANSWER_CAP = 4000
 TIMEOUT = 120
@@ -149,17 +151,35 @@ def _grep_files(terms: list[str]) -> list[str]:
     return hits[:MAX_FILES]
 
 
+def _read_relevant(f: str, terms: list[str]) -> str:
+    """Extract relevant sections of f by grepping for terms with surrounding context.
+    Falls back to reading from the start when terms produce no hits in the file."""
+    if terms:
+        pattern = "|".join(re.escape(t) for t in terms)
+        rg = shutil.which("rg")
+        cmd = (
+            [rg, "-n", "-C", str(CONTEXT_LINES), "-m", str(GREP_MAX_MATCHES), "-i", "-e", pattern, f]
+            if rg
+            else ["grep", "-n", "-C", str(CONTEXT_LINES), "-i", "-E", pattern, f]
+        )
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.stdout.strip():
+            return res.stdout[:MAX_FILE_CHARS]
+    try:
+        with open(f, encoding="utf-8", errors="replace") as fh:
+            return fh.read(MAX_FILE_CHARS)
+    except OSError:
+        return ""
+
+
 def _gather(question: str, paths: list[str]) -> str:
-    files = (_expand_paths(paths) if paths else _grep_files(_terms(question)))[
-        :MAX_FILES
-    ]
+    terms = _terms(question)
+    files = (_expand_paths(paths) if paths else _grep_files(terms))[:MAX_FILES]
     chunks: list[str] = []
     used = 0
     for f in files:
-        try:
-            with open(f, encoding="utf-8", errors="replace") as fh:
-                body = fh.read(MAX_FILE_CHARS)
-        except OSError:
+        body = _read_relevant(f, terms)
+        if not body:
             continue
         block = f"### {os.path.relpath(f, ROOT)}\n{body}"
         if used + len(block) > BUDGET:
@@ -174,9 +194,12 @@ def _gather(question: str, paths: list[str]) -> str:
 def _ask(question: str, context: str, timeout: int = TIMEOUT) -> str:
     system = (
         "You are a code-exploration assistant. Answer the question using ONLY the "
-        "repository context provided, citing file paths. Default to a few lines; when the "
-        "question asks for a code excerpt or a broad summary, give it in full — up to "
-        "roughly a page. If the context does not contain the answer, say so plainly."
+        "repository context provided, citing file paths. "
+        "Reply in plain prose — do NOT output Python, shell, pseudocode, or any "
+        "function-call syntax such as explore(...), Task(...), or similar constructs. "
+        "Default to a few lines; when the question asks for a code excerpt or a broad "
+        "summary, reproduce the actual code from the context — up to roughly a page. "
+        "If the context does not contain the answer, say so in one sentence."
     )
     user = f"Question: {question}\n\nRepository context:\n{context or '(no matching files found)'}"
     payload = {
@@ -210,18 +233,18 @@ def _retrieval(question: str, paths: list[str], ask_timeout: int = TIMEOUT) -> s
     return answer[:ANSWER_CAP]
 
 
-# Purely positive: deliberately names ONLY the three real tools and never mentions the
-# delegation pattern the weak model tends to emit as text — naming it (even to forbid it)
-# primes it on a 3B-active model. Keep this prompt free of that vocabulary.
+# Explicit prohibition is included despite the risk that naming it primes small models:
+# the alternative (no prohibition) produces worse failures (pseudocode echoed as answers).
 _AGENT_SYSTEM = (
     "You are a read-only code-exploration assistant with three tools: Grep, Glob, and Read. "
     "Investigate by calling them directly — your first action is a Grep or Glob call to "
     "locate the relevant files, then Read the few that matter. Use paths relative to the "
     "current directory (e.g. `lib/server.zsh`); to list or search a directory, use Glob or "
     "Grep, not Read. Work efficiently — about 8 tool calls at most — then stop and reply "
-    "with only the final answer, citing the file paths. Default to a few lines; when the "
-    "question asks for a code excerpt or a broad summary, give it in full — up to roughly "
-    "a page."
+    "with only the final answer in plain prose, citing the file paths. "
+    "Do NOT output Python, shell, pseudocode, or any function-call syntax in your final reply. "
+    "Default to a few lines; when the question asks for a code excerpt or a broad summary, "
+    "reproduce the actual code — up to roughly a page."
 )
 
 _AGENT_SETTINGS_PATH = ""

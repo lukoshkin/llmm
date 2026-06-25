@@ -17,7 +17,7 @@ LLMM_MCP_CONFIG=${LLMM_MCP_CONFIG:-}
 # prompts/lean-coder.md (tuned for Qwen-class coder models).
 LLMM_SYSTEM_PROMPT=${LLMM_SYSTEM_PROMPT:-}
 # Auto-compact threshold, percent of the window (lean only). 80 => compact near 80%.
-LLMM_COMPACT_PCT=${LLMM_COMPACT_PCT:-80}
+LLMM_COMPACT_PCT=${LLMM_COMPACT_PCT:-88}
 # Scratchpad: session-scoped structured findings file that survives autocompaction.
 # Re-enables a Stop hook + a tiny MCP server under lean mode (via explicit --settings /
 # --mcp-config, which survive --bare). On by default in lean mode.

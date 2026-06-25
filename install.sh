@@ -101,7 +101,7 @@ if $UPDATE; then
     [ -n "${LLMM_DEV_SRC:-}" ] || die "--local requires LLMM_DEV_SRC (your local llmm checkout); set it in config.zsh"
     [ -d "$LLMM_DEV_SRC/.git" ] || die "LLMM_DEV_SRC is not a git repo: $LLMM_DEV_SRC"
     has rsync || die "rsync is required for --local update"
-    local _rsync_flags="-a --exclude='.git'"
+    _rsync_flags="-a --exclude='.git'"
     $FORCE && _rsync_flags="$_rsync_flags --delete"
     say "syncing llmm source from local $LLMM_DEV_SRC"
     # Trailing slash on src is intentional: sync contents, not the directory itself.

@@ -56,6 +56,7 @@ claude::write_hooks_json() {
   [[ -L "$f" ]] && ui::die "refusing to write through symlink: $f"
   cat > "$f" <<JSON
 {
+  "autoCompactWindow": $ctx,
   "hooks": {
     "Stop": [{"hooks": [{"type": "command", "command": "LLMM_SCRATCHPAD_PCT=$pct CLAUDE_CODE_MAX_CONTEXT_TOKENS=$ctx $hd/stop.sh"}]}],
     "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": "$hd/session_start.sh $dir $id"}]}]
