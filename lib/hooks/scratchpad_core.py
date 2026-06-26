@@ -110,7 +110,7 @@ def parse_sections(text: str) -> dict[str, str]:
 def render(sections: dict[str, str]) -> str:
     parts = []
     for h in HEADERS:
-        body = sections.get(h, "").strip("\n")
+        body = sections[h].strip("\n")
         parts.append(f"## {h}\n{body}".rstrip() + "\n")
     return "\n".join(parts) + "\n"
 

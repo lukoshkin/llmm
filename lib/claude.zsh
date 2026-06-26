@@ -45,21 +45,34 @@ claude::compact_pct() {
   print -r -- "$pct"
 }
 
+# claude::checkpoint_pct -> validated stop-hook checkpoint-reminder threshold (integer 1..99).
+# Fires before autoCompact so the model can save progress. Default 60 (well below autoCompact).
+# Override with LLMM_CHECKPOINT_PCT.
+claude::checkpoint_pct() {
+  local pct="${LLMM_CHECKPOINT_PCT:-60}"
+  if [[ "$pct" != <-> ]] || (( pct < 1 || pct > 99 )); then
+    ui::die "LLMM_CHECKPOINT_PCT must be an integer 1..99, got: $pct"
+  fi
+  print -r -- "$pct"
+}
+
 # claude::session_id -> shell-safe unique-ish id for this launch.
 # Returns a UUID for Claude Code's --session-id flag.
 claude::session_id() { print -r -- "$(uuidgen | tr '[:upper:]' '[:lower:]')"; }
 
-# claude::write_hooks_json <scratchpad_dir> <id> <ctx> <pct> -> prints the file path.
+# claude::write_hooks_json <scratchpad_dir> <id> <ctx> <checkpoint_pct> -> prints the file path.
+# checkpoint_pct: when the Stop-hook checkpoint reminder fires (% of ctx window; should be < compact pct).
 claude::write_hooks_json() {
-  local dir="$1" id="$2" ctx="$3" pct="$4"
+  local dir="$1" id="$2" ctx="$3" checkpoint_pct="$4"
   local hd="$LLMM_ROOT/lib/hooks" f="$1/hooks.$2.json"
   [[ -L "$f" ]] && ui::die "refusing to write through symlink: $f"
   cat > "$f" <<JSON
 {
   "autoCompactWindow": $ctx,
   "hooks": {
-    "Stop": [{"hooks": [{"type": "command", "command": "LLMM_SCRATCHPAD_PCT=$pct CLAUDE_CODE_MAX_CONTEXT_TOKENS=$ctx $hd/stop.sh"}]}],
-    "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": "$hd/session_start.sh $dir $id"}]}]
+    "Stop": [{"hooks": [{"type": "command", "command": "LLMM_SCRATCHPAD_PCT=$checkpoint_pct CLAUDE_CODE_MAX_CONTEXT_TOKENS=$ctx $hd/stop.sh"}]}],
+    "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": "$hd/session_start.sh $dir $id"}]}],
+    "PostToolUse": [{"matcher": "Write", "hooks": [{"type": "command", "command": "$hd/post_tool_use.sh"}]}]
   }
 }
 JSON
@@ -157,9 +170,10 @@ claude::launch() {
   (( _is_continue )) || cargs+=(--name "$(basename "$PWD")-$(date +%H:%M:%S)")
   if [[ "$lean" == 1 ]]; then
     # Validate before building so bad config fails loudly and early.
-    local prompt pct
+    local prompt pct cpct
     prompt="$(claude::lean_prompt)" || exit 1
     pct="$(claude::compact_pct)" || exit 1
+    cpct="$(claude::checkpoint_pct)" || exit 1
     cenv+=(
       CLAUDE_CODE_DISABLE_1M_CONTEXT=1
       CLAUDE_CODE_MAX_CONTEXT_TOKENS="$ctx"
@@ -239,7 +253,7 @@ claude::launch() {
       cargs+=(--allowedTools "${mcpallow[@]}")
       if (( want_scratch )); then
         local hooks="$scratch/hooks.$sid.json"
-        [[ -z "${LLMM_DRYRUN:-}" ]] && claude::write_hooks_json "$scratch" "$sid" "$ctx" "$pct" >/dev/null
+        [[ -z "${LLMM_DRYRUN:-}" ]] && claude::write_hooks_json "$scratch" "$sid" "$ctx" "$cpct" >/dev/null
         cargs+=(--settings "$hooks")
         cargs+=(--plugin-dir "$LLMM_ROOT/lib/claude-commands")
         cenv+=(LLMM_SCRATCHPAD_FILE="$scratch/$sid.md")

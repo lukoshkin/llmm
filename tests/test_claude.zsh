@@ -136,14 +136,15 @@ assert_eq "$([[ -n "$_sid" && "$_sid" != *[^A-Za-z0-9_]* ]] && print ok)" ok "se
 
 # --- write_hooks_json produces a valid hooks file wired to the hook scripts ---
 typeset _wd; _wd="$(mktemp -d)/.llmm"; mkdir -p "$_wd"
-typeset _hf; _hf="$(claude::write_hooks_json "$_wd" testid 65536 85)"
+typeset _hf; _hf="$(claude::write_hooks_json "$_wd" testid 65536 60)"
 assert_eq "$([[ -f "$_hf" ]] && print yes)" yes "hooks json written"
 typeset _hj; _hj="$(cat "$_hf")"
 assert_contains "$_hj" "stop.sh" "hooks json wires stop.sh"
 assert_contains "$_hj" "session_start.sh" "hooks json wires session_start.sh"
 assert_contains "$_hj" '"matcher": "compact"' "hooks json uses compact matcher"
 assert_contains "$_hj" "CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536" "hooks json bakes max tokens"
-assert_contains "$_hj" "LLMM_SCRATCHPAD_PCT=85" "hooks json bakes pct"
+assert_contains "$_hj" "LLMM_SCRATCHPAD_PCT=60" "hooks json bakes checkpoint pct"
+assert_contains "$_hj" "post_tool_use.sh" "hooks json wires post_tool_use.sh"
 
 # --- write_mcp_json includes each server independently and stays valid JSON ---
 # both servers on
@@ -195,6 +196,6 @@ assert_eq "$([[ -f "$_rd/sess.md" ]] && print y || print n)" y "reap keeps scrat
 # --- writers refuse to follow a pre-planted symlink (symlink-clobber guard) ---
 typeset _lt; _lt="$(mktemp)"
 ln -s "$_lt" "$_rd/hooks.evil.json"
-assert_rc 1 "$( (claude::write_hooks_json "$_rd" evil 65536 85) >/dev/null 2>&1; print $? )" "write_hooks_json refuses symlink target"
+assert_rc 1 "$( (claude::write_hooks_json "$_rd" evil 65536 60) >/dev/null 2>&1; print $? )" "write_hooks_json refuses symlink target"
 assert_eq "$(cat "$_lt")" "" "symlink target left untouched"
 rm -f "$_lt" "$_rd/hooks.evil.json"

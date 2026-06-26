@@ -117,7 +117,7 @@ llmm::cmd_scratchpad() {
     sid="${sid%.txt}"
 
     md_file="$scratch_dir/$sid.md"
-    preview=""
+    preview=" (no checkpoint yet)"
     if [[ -f "$md_file" ]]; then
       status_section="$(
         awk '/^## Status$/{f=1;next} /^## /{f=0} f{print}' "$md_file" |
@@ -132,11 +132,27 @@ llmm::cmd_scratchpad() {
 
   [[ ${#active_sids} -eq 0 ]] && ui::die "no active llmm sessions found"
 
+  # checkpoint bootstraps from empty_doc() when the file is absent, so a
+  # pre-created template is fully compatible with later checkpoint calls.
+  llmm::_init_scratchpad() {
+    local path="$1"
+    [[ -f "$path" ]] && return
+    # Format matches scratchpad_core.py::empty_doc() (2 blank lines between sections).
+    printf '%s\n' \
+      '## Task' '' '' \
+      '## Status' '' '' \
+      '## Findings' '' '' \
+      '## Decisions' '' '' \
+      '## Dead ends' '' '' \
+      '## Open questions' '' \
+      > "$path"
+  }
+
   local ed="${EDITOR:-${VISUAL:-nvim}}"
 
   if ((${#active_sids} == 1)); then
     md_file="$scratch_dir/${active_sids[1]}.md"
-    [[ -f "$md_file" ]] || ui::die "session ${active_sids[1]} has no scratchpad yet (checkpoint not called)"
+    llmm::_init_scratchpad "$md_file"
     ui::info "opening scratchpad: ${active_sids[1]}.md"
     exec "$ed" "$md_file"
   fi
@@ -155,7 +171,7 @@ llmm::cmd_scratchpad() {
   for ((i = 1; i <= $#active_sids; i++)); do
     if [[ "${menu_items[i]}" == "$chosen" ]]; then
       md_file="$scratch_dir/${active_sids[i]}.md"
-      [[ -f "$md_file" ]] || ui::die "session ${active_sids[i]} has no scratchpad yet"
+      llmm::_init_scratchpad "$md_file"
       ui::info "opening scratchpad: ${active_sids[i]}.md"
       exec "$ed" "$md_file"
     fi

@@ -152,6 +152,11 @@ server::ensure() {
       local ans; read -r ans
       if [[ "$ans" == [yY]* ]]; then
         server::kill "$port"
+        # Wait for the port to be released before binding a new server (kill is asynchronous).
+        local _kw; for (( _kw = 1; _kw <= 10; _kw++ )); do
+          server::is_healthy "$port" || break
+          sleep 0.5
+        done
         server::start "$profile" "$model" "$alias" "$port"; return
       fi
       ui::info "keeping $ralias"; return 0

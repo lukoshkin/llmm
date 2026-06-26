@@ -259,8 +259,9 @@ def _agent_settings() -> str:
     if it is wrong it fails SAFE (unmatched -> denied), never open — but in-repo Grep/Glob
     must be live-verified to still work (open item in the spec)."""
     global _AGENT_SETTINGS_PATH
-    if _AGENT_SETTINGS_PATH:
+    if _AGENT_SETTINGS_PATH and os.path.exists(_AGENT_SETTINGS_PATH):
         return _AGENT_SETTINGS_PATH
+    _AGENT_SETTINGS_PATH = ""
     cfg = {
         "permissions": {
             "allow": [f"Read({ROOT}/**)", f"Grep({ROOT}/**)", f"Glob({ROOT}/**)"]
@@ -306,7 +307,7 @@ def _log(msg: str) -> None:
 def _is_loopback(base_url: str) -> bool:
     """Only spawn the nested session against a local server. This is the hard guarantee
     that agent mode talks to the local model, never api.anthropic.com."""
-    return urlparse(base_url).hostname in ("127.0.0.1", "localhost", "::1", "0.0.0.0")
+    return urlparse(base_url).hostname in ("127.0.0.1", "localhost", "::1")
 
 
 def _agent(question: str, paths: list[str]) -> str:
