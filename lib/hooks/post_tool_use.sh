@@ -1,17 +1,24 @@
 #!/usr/bin/env sh
 # PostToolUse hook: nudge the model to checkpoint before context pressure forces compaction.
 # - Write: always nudge (findings just landed on disk).
-# - Bash:  nudge only when context >= LLMM_SCRATCHPAD_PCT (same threshold as stop.sh).
+# - mcp__scratchpad__*: skip — don't nudge after the model already checkpointed/recalled.
+# - Everything else (Read, Bash, mcp__explore__explore, ...): nudge only above threshold.
+#   The matcher in hooks.json is ".*" so all tools arrive here.
 input=$(cat)
 
 tool=$(printf '%s' "$input" | jq -r '.tool_name // empty')
+
+# Never nudge after the model already used a scratchpad tool.
+case "$tool" in
+  mcp__scratchpad__*) exit 0 ;;
+esac
 
 if [ "$tool" = "Write" ]; then
   printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"If this write produced findings, a status change, or a decision worth preserving across compaction, call checkpoint() now."}}\n'
   exit 0
 fi
 
-# Bash path: only fire when context is building toward the compaction threshold.
+# All other tools: only fire when context is building toward the compaction threshold.
 tp=$(printf '%s' "$input" | jq -r '.transcript_path // empty')
 [ -n "$tp" ] && [ -f "$tp" ] || exit 0
 

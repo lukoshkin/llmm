@@ -75,7 +75,7 @@ claude::write_hooks_json() {
   "hooks": {
     "Stop": [{"hooks": [{"type": "command", "command": "LLMM_SCRATCHPAD_PCT=$checkpoint_pct CLAUDE_CODE_MAX_CONTEXT_TOKENS=$ctx $hd/stop.sh"}]}],
     "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": "$hd/session_start.sh $dir $id"}]}],
-    "PostToolUse": [{"matcher": "Write|Bash", "hooks": [{"type": "command", "command": "LLMM_SCRATCHPAD_PCT=$checkpoint_pct CLAUDE_CODE_MAX_CONTEXT_TOKENS=$ctx $hd/post_tool_use.sh"}]}]
+    "PostToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": "LLMM_SCRATCHPAD_PCT=$checkpoint_pct CLAUDE_CODE_MAX_CONTEXT_TOKENS=$ctx $hd/post_tool_use.sh"}]}]
   }
 }
 JSON

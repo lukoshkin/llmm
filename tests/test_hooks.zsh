@@ -64,11 +64,26 @@ _in='{"tool_name":"Write","transcript_path":"/dev/null"}'
 _out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/post_tool_use.sh")"
 assert_contains "$_out" "checkpoint" "post_tool_use fires for Write unconditionally"
 
-# --- post_tool_use.sh: Bash nudges when over threshold ---
+# --- post_tool_use.sh: Read nudges when over threshold ---
 print -r -- '{"type":"assistant","message":{"usage":{"input_tokens":60000}}}' > "$_tr"
+_in="{\"tool_name\":\"Read\",\"transcript_path\":\"$_tr\"}"
+_out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/post_tool_use.sh")"
+assert_contains "$_out" "CHECKPOINT RECOMMENDED" "post_tool_use fires for Read over threshold"
+
+# --- post_tool_use.sh: Bash nudges when over threshold ---
 _in="{\"tool_name\":\"Bash\",\"transcript_path\":\"$_tr\"}"
 _out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/post_tool_use.sh")"
 assert_contains "$_out" "CHECKPOINT RECOMMENDED" "post_tool_use fires for Bash over threshold"
+
+# --- post_tool_use.sh: mcp__explore nudges when over threshold ---
+_in="{\"tool_name\":\"mcp__explore__explore\",\"transcript_path\":\"$_tr\"}"
+_out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/post_tool_use.sh")"
+assert_contains "$_out" "CHECKPOINT RECOMMENDED" "post_tool_use fires for mcp__explore over threshold"
+
+# --- post_tool_use.sh: mcp__scratchpad__checkpoint never nudges (loop guard) ---
+_in="{\"tool_name\":\"mcp__scratchpad__checkpoint\",\"transcript_path\":\"$_tr\"}"
+_out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/post_tool_use.sh")"
+assert_eq "$_out" "" "post_tool_use silent after checkpoint (loop guard)"
 
 # --- post_tool_use.sh: Bash silent when transcript_path absent ---
 _in='{"tool_name":"Bash"}'
