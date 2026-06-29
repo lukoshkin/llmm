@@ -46,10 +46,12 @@ claude::compact_pct() {
 }
 
 # claude::checkpoint_pct -> validated stop-hook checkpoint-reminder threshold (integer 1..99).
-# Fires before autoCompact so the model can save progress. Default 60 (well below autoCompact).
+# Must fire before the effective compaction trigger, which is (window - autocompact_buffer).
+# Claude Code reserves ~45% of the window as a post-compaction buffer, so compaction fires
+# at ~55% regardless of LLMM_COMPACT_PCT. Default 40 keeps a safe margin below that.
 # Override with LLMM_CHECKPOINT_PCT.
 claude::checkpoint_pct() {
-  local pct="${LLMM_CHECKPOINT_PCT:-60}"
+  local pct="${LLMM_CHECKPOINT_PCT:-40}"
   if [[ "$pct" != <-> ]] || (( pct < 1 || pct > 99 )); then
     ui::die "LLMM_CHECKPOINT_PCT must be an integer 1..99, got: $pct"
   fi
@@ -61,7 +63,8 @@ claude::checkpoint_pct() {
 claude::session_id() { print -r -- "$(uuidgen | tr '[:upper:]' '[:lower:]')"; }
 
 # claude::write_hooks_json <scratchpad_dir> <id> <ctx> <checkpoint_pct> -> prints the file path.
-# checkpoint_pct: when the Stop-hook checkpoint reminder fires (% of ctx window; should be < compact pct).
+# checkpoint_pct: when the Stop-hook checkpoint reminder fires (% of ctx window; must be < effective
+# compaction trigger, which is ~55% due to Claude Code's ~45% autocompact buffer reserve).
 claude::write_hooks_json() {
   local dir="$1" id="$2" ctx="$3" checkpoint_pct="$4"
   local hd="$LLMM_ROOT/lib/hooks" f="$1/hooks.$2.json"
@@ -72,7 +75,7 @@ claude::write_hooks_json() {
   "hooks": {
     "Stop": [{"hooks": [{"type": "command", "command": "LLMM_SCRATCHPAD_PCT=$checkpoint_pct CLAUDE_CODE_MAX_CONTEXT_TOKENS=$ctx $hd/stop.sh"}]}],
     "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": "$hd/session_start.sh $dir $id"}]}],
-    "PostToolUse": [{"matcher": "Write", "hooks": [{"type": "command", "command": "$hd/post_tool_use.sh"}]}]
+    "PostToolUse": [{"matcher": "Write|Bash", "hooks": [{"type": "command", "command": "LLMM_SCRATCHPAD_PCT=$checkpoint_pct CLAUDE_CODE_MAX_CONTEXT_TOKENS=$ctx $hd/post_tool_use.sh"}]}]
   }
 }
 JSON
@@ -167,7 +170,7 @@ claude::launch() {
   # HH:MM:SS suffix distinguishes concurrent sessions from the same folder.
   local _is_continue=0
   for _a in "$@"; do [[ "$_a" == --continue || "$_a" == -c ]] && _is_continue=1 && break; done
-  (( _is_continue )) || cargs+=(--name "$(basename "$PWD")-$(date +%H:%M:%S)")
+  (( _is_continue )) || cargs+=(--name "⚡llmm⚡ | $(basename "$PWD")-$(date +%H:%M:%S)")
   if [[ "$lean" == 1 ]]; then
     # Validate before building so bad config fails loudly and early.
     local prompt pct cpct

@@ -9,6 +9,12 @@ _in="{\"stop_hook_active\":false,\"transcript_path\":\"$_tr\"}"
 _out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/stop.sh")"
 assert_contains "$_out" "CHECKPOINT REQUIRED" "stop hook fires over threshold"
 assert_contains "$_out" "Stop" "stop hook tags the Stop event"
+assert_contains "$_out" '"continue":true' "stop hook sets continue:true so Claude acts on the message"
+
+# --- stop.sh: cache tokens count toward threshold (real-world case: input_tokens is tiny) ---
+print -r -- '{"type":"assistant","message":{"usage":{"input_tokens":1,"cache_read_input_tokens":59999}}}' > "$_tr"
+_out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/stop.sh")"
+assert_contains "$_out" "CHECKPOINT REQUIRED" "stop hook counts cache_read tokens toward threshold"
 
 # --- stop.sh: under threshold emits nothing ---
 print -r -- '{"type":"assistant","message":{"usage":{"input_tokens":1000}}}' > "$_tr"
@@ -52,4 +58,26 @@ assert_contains "$_ss" "does C hold?" "session_start emits Open questions"
 assert_not_contains "$_ss" "secret sauce" "session_start omits Findings"
 assert_not_contains "$_ss" "tried B" "session_start omits Dead ends"
 assert_contains "$_ss" "recall(" "session_start hints at recall"
+
+# --- post_tool_use.sh: Write always nudges ---
+_in='{"tool_name":"Write","transcript_path":"/dev/null"}'
+_out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/post_tool_use.sh")"
+assert_contains "$_out" "checkpoint" "post_tool_use fires for Write unconditionally"
+
+# --- post_tool_use.sh: Bash nudges when over threshold ---
+print -r -- '{"type":"assistant","message":{"usage":{"input_tokens":60000}}}' > "$_tr"
+_in="{\"tool_name\":\"Bash\",\"transcript_path\":\"$_tr\"}"
+_out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/post_tool_use.sh")"
+assert_contains "$_out" "CHECKPOINT RECOMMENDED" "post_tool_use fires for Bash over threshold"
+
+# --- post_tool_use.sh: Bash silent when transcript_path absent ---
+_in='{"tool_name":"Bash"}'
+_out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/post_tool_use.sh")"
+assert_eq "$_out" "" "post_tool_use silent for Bash with missing transcript_path"
+
+# --- post_tool_use.sh: Bash silent under threshold ---
+print -r -- '{"type":"assistant","message":{"usage":{"input_tokens":1000}}}' > "$_tr"
+_out="$(print -r -- "$_in" | CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 LLMM_SCRATCHPAD_PCT=85 "$_hd/post_tool_use.sh")"
+assert_eq "$_out" "" "post_tool_use silent for Bash under threshold"
+
 rm -rf "$_tmp"
